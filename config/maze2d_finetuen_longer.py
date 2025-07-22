@@ -51,19 +51,19 @@ base = {
         'preprocess_fns': ['maze2d_set_terminals'],
         'clip_denoised': True,
         'use_padding': False,
-        'max_path_length': 40000,
+        'max_path_length': 800,
 
         ## serialization
         'logbase': 'logs',
-        'prefix': 'diffusion/',
+        'prefix': 'diffusion_finetune/',
         'exp_name': watch(diffusion_args_to_watch),
 
         ## training
-        'n_steps_per_epoch': 10000,
+        'n_steps_per_epoch': 1000,
         'loss_type': 'l2',
-        'n_train_steps': 2e6,
+        'n_train_steps': 5e4,
         'batch_size': 32,
-        'learning_rate': 2e-4,
+        'learning_rate': 1e-4,
         'gradient_accumulate_every': 2,
         'ema_decay': 0.995,
         'save_freq': 1000,
@@ -74,6 +74,9 @@ base = {
         'n_samples': 10,
         'bucket': None,
         'device': 'cuda',
+        ## loading
+        'finetune': True,
+        'loadpath': '/home/junda/diffuser/logs/maze2d-large-v1/diffusion/H384_T256/state_1960000.pt',
     },
 
     'plan': {
@@ -88,15 +91,15 @@ base = {
         ## serialization
         'vis_freq': 10,
         'logbase': 'logs',
-        'prefix': 'plans/release',
+        'prefix': 'plans_finetune_longer/release',
         'exp_name': watch(plan_args_to_watch),
         'suffix': '0',
-
+    
         'conditional': False,
         'replan': False,
 
         ## loading
-        'diffusion_loadpath': 'f:diffusion/H{horizon}_T{n_diffusion_steps}',
+        'diffusion_loadpath': 'f:diffusion_finetune/H{horizon}_T{n_diffusion_steps}_Eevolution_longer',
         'diffusion_epoch': 'latest',
     },
 

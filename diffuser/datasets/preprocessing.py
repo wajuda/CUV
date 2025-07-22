@@ -55,6 +55,19 @@ def add_deltas(env):
 
     return _fn
 
+def wjd(env):
+    
+    def _fn(dataset):
+        """
+            wjd : weighted joint distance
+            wjd = ||x - x'||
+            where x is the observation and x' is the next observation
+        """
+        print(
+            f'[ utils/preprocessing ] Adding wjd to dataset '
+        )
+
+    return _fn
 
 def maze2d_set_terminals(env):
     env = load_environment(env) if type(env) == str else env

@@ -2,7 +2,6 @@ import numpy as np
 import torch
 from torch import nn
 import pdb
-from collections import namedtuple
 
 import diffuser.utils as utils
 from .helpers import (
@@ -11,58 +10,6 @@ from .helpers import (
     apply_conditioning,
     Losses,
 )
-
-Sample = namedtuple('sample', 'trajectories values chains')
-
-def default_sample_fn(model, x, cond, t):
-    model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, t=t)
-    model_std = torch.exp(0.5 * model_log_variance)
-
-    # no noise when t == 0
-    noise = torch.randn_like(x)
-    noise[t == 0] = 0
-
-    values = torch.zeros(len(x), device=x.device)
-    return model_mean + model_std * noise, values
-
-@torch.no_grad()
-def n_step_guided_p_sample(
-    model, x, cond, t, guide, scale=0.001, t_stopgrad=0, n_guide_steps=1, scale_grad_by_std=True,
-):
-    model_log_variance = extract(model.posterior_log_variance_clipped, t, x.shape)
-    model_std = torch.exp(0.5 * model_log_variance)
-    model_var = torch.exp(model_log_variance)
-
-    for _ in range(n_guide_steps):
-        with torch.enable_grad():
-            y, grad = guide.gradients(x, cond, t)
-
-        if scale_grad_by_std:
-            grad = model_var * grad
-
-        grad[t < t_stopgrad] = 0
-        #print(f'什么时候{x.shape}:{grad.shape}')
-
-        x = x + scale * grad
-        x = apply_conditioning(x, cond, model.action_dim)
-
-    model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, t=t)
-
-    # no noise when t == 0
-    noise = torch.randn_like(x)
-    noise[t == 0] = 0
-
-    return model_mean + model_std * noise, y
-
-def sort_by_values(x, values):
-    inds = torch.argsort(values, descending=True)
-    x = x[inds]
-    values = values[inds]
-    return x, values
-
-
-
-
 
 class GaussianDiffusion(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
@@ -179,7 +126,16 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, cond, verbose=True, return_diffusion=False, sample_fn = default_sample_fn, **sample_kwargs):
+    def p_sample(self, x, cond, t):
+        b, *_, device = *x.shape, x.device
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, cond=cond, t=t)
+        noise = torch.randn_like(x)
+        # no noise when t == 0
+        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
+        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+
+    @torch.no_grad()
+    def p_sample_loop(self, shape, cond, verbose=True, return_diffusion=False):
         device = self.betas.device
 
         batch_size = shape[0]
@@ -191,27 +147,19 @@ class GaussianDiffusion(nn.Module):
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
             timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
-            #x = self.p_sample(x, cond, timesteps)
-            #价值guided
-            x, values = sample_fn(self, x, cond,timesteps,**sample_kwargs)
+            x = self.p_sample(x, cond, timesteps)
             x = apply_conditioning(x, cond, self.action_dim)
 
-            progress.update({'t': i, 'vmin':values.min().item(), 'vmax':values.max().item()})
+            progress.update({'t': i})
 
             if return_diffusion: diffusion.append(x)
 
         progress.close()
-        x, values = sort_by_values(x, values)
 
-        '''if return_diffusion:
+        if return_diffusion:
             return x, torch.stack(diffusion, dim=1)
         else:
-            return x'''
-        if return_diffusion: 
-            diffusion = torch.stack(diffusion, dim=1)
-            return Sample(x,values,diffusion)
-        else:
-            return x, values
+            return x
 
     @torch.no_grad()
     def conditional_sample(self, cond, *args, horizon=None, **kwargs):
@@ -237,7 +185,7 @@ class GaussianDiffusion(nn.Module):
         )
 
         return sample
-
+ 
     def p_losses(self, x_start, cond, t):
         noise = torch.randn_like(x_start)
 
@@ -260,8 +208,7 @@ class GaussianDiffusion(nn.Module):
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
         return self.p_losses(x, cond, t)
-     
+
     def forward(self, cond, *args, **kwargs):
-        #assert False,'xianzai'
         return self.conditional_sample(cond=cond, *args, **kwargs)
 

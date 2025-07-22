@@ -266,6 +266,8 @@ class MuJoCoRenderer:
     def __call__(self, *args, **kwargs):
         return self.renders(*args, **kwargs)
 
+
+
 #-----------------------------------------------------------------------------#
 #----------------------------------- maze2d ----------------------------------#
 #-----------------------------------------------------------------------------#
@@ -273,7 +275,8 @@ class MuJoCoRenderer:
 MAZE_BOUNDS = {
     'maze2d-umaze-v1': (0, 5, 0, 5),
     'maze2d-medium-v1': (0, 8, 0, 8),
-    'maze2d-large-v1': (0, 9, 0, 12)
+    'maze2d-large-v1': (0, 9, 0, 12),
+    'maze2d-large-nowall-v1': (0, 9, 0, 12)
 }
 
 class MazeRenderer:
@@ -306,6 +309,7 @@ class MazeRenderer:
             savepath : str
             observations : [ n_paths x horizon x 2 ]
         '''
+        print(len(paths))
         assert len(paths) % ncol == 0, 'Number of paths must be divisible by number of columns'
 
         images = []
@@ -348,7 +352,143 @@ class Maze2dRenderer(MazeRenderer):
 
         if conditions is not None:
             conditions /= scale
+
+        
         return super().renders(observations, conditions, **kwargs)
+
+
+class Maze2dRendererBlock(MazeRenderer):
+
+    def __init__(self, env, observation_dim=None):
+        self.env_name = env
+        self.env = load_environment(env)
+        self.observation_dim = np.prod(self.env.observation_space.shape)
+        self.action_dim = np.prod(self.env.action_space.shape)
+        self.goal = None
+        self._background = self.env.maze_arr == 10
+        self._remove_margins = False
+        self._extent = (0, 1, 1, 0)
+
+    def renders(self, observations, conditions=None, title=None, **kwargs):
+        if 'maze2d-large' in self.env_name:
+            # this is a special case where the maze is not a square
+            # and the bounds are different
+            bounds = (0, 9, 0, 12)
+        else:
+            # use the default bounds for maze2d
+            # this is a square maze
+            bounds = MAZE_BOUNDS[self.env_name]
+
+        observations = observations + .5
+        if len(bounds) == 2:
+            _, scale = bounds
+            observations /= scale
+        elif len(bounds) == 4:
+            _, iscale, _, jscale = bounds
+            observations[:, 0] /= iscale
+            observations[:, 1] /= jscale
+        else:
+            raise RuntimeError(f'Unrecognized bounds for {self.env_name}: {bounds}')
+
+        if conditions is not None:
+            conditions /= scale
+
+        plt.clf()
+        fig = plt.gcf()
+        fig.set_size_inches(5, 5)
+        plt.imshow(self._background * .5,
+            extent=self._extent, cmap=plt.cm.binary, vmin=0, vmax=1)
+
+        if self.env_name == 'maze2d-large-nowall-v1':
+            marker = np.zeros((self.env.maze_arr.shape[0], self.env.maze_arr.shape[1], 4))
+            marker[2,2] = [0,1,0,0.5]
+            marker[2,3] = [0,1,0,0.5]
+            plt.imshow(marker, extent=self._extent, interpolation='none')
+
+        if self.env_name == 'maze2d-large-block-v1':
+            marker = np.zeros((self.env.maze_arr.shape[0], self.env.maze_arr.shape[1], 4))
+            marker[4,6] = [0,1,0,0.5]
+            #marker[2,3] = [0,1,0,0.5]
+            plt.imshow(marker, extent=self._extent, interpolation='none')
+
+        path_length = len(observations)
+        colors = plt.cm.jet(np.linspace(0,1,path_length))
+        plt.plot(observations[:,1], observations[:,0], c='black', zorder=10)
+        plt.scatter(observations[:,1], observations[:,0], c=colors, zorder=20)
+        plt.axis('off')
+        plt.title(title)
+        img = plot2img(fig, remove_margins=self._remove_margins)
+        return img
+
+        
+        
+
+class Maze2dRendererCover(Maze2dRenderer):
+    
+    def __init__(self, env, observation_dim=None):
+        super().__init__(env, observation_dim)
+
+    def renders(self, observations, conditions=None, **kwargs):
+        # observations : [ n*len* 2 ]
+        if 'maze2d-large' in self.env_name:
+            # this is a special case where the maze is not a square
+            # and the bounds are different
+            bounds = (0, 9, 0, 12)
+        else:
+            # use the default bounds for maze2d
+            # this is a square maze
+            bounds = MAZE_BOUNDS[self.env_name]
+        
+        #paths = [observations[i] + .5 for i in range(len(observations))]
+        observations = np.asarray(observations, dtype = object)
+        paths = observations + .5
+        #observations = observations + .5
+        if len(bounds) == 2:
+            _, scale = bounds
+            paths /= scale
+        elif len(bounds) == 4:
+            _, iscale, _, jscale = bounds
+            for i in range(len(paths)):
+                paths[i][:, 0] /= iscale
+                paths[i][:, 1] /= jscale
+        else:
+            raise RuntimeError(f'Unrecognized bounds for {self.env_name}: {bounds}')
+
+        if conditions is not None:
+            conditions /= scale
+
+        plt.clf()
+        fig = plt.gcf()
+        fig.set_size_inches(5, 5)
+        plt.imshow(self._background * .5,
+                extent=self._extent, cmap=plt.cm.binary, vmin=0, vmax=1)
+        if self.env_name == 'maze2d-large-nowall-v1':
+            marker = np.zeros((self.env.maze_arr.shape[0], self.env.maze_arr.shape[1], 4))
+            marker[2,2] = [0,1,0,0.5]
+            marker[2,3] = [0,1,0,0.5]
+            plt.imshow(marker, extent=self._extent, interpolation='none')
+            
+
+        path_length = len(paths)
+        colors = plt.cm.jet(np.linspace(0,1,path_length))
+        for i, path in enumerate(paths):
+            plt.plot(path[:,1], path[:,0], c=colors[i], zorder=10)
+            plt.scatter(path[-1,1], path[-1,0], c='black', zorder=20, s =10)
+        
+        plt.axis('off')
+        img = plot2img(fig, remove_margins=self._remove_margins)
+        return img
+
+    def composite(self, savepath, paths, ncol=5, **kwargs):
+        '''
+            savepath : str
+            observations : [ n_paths x horizon x 2 ]
+        '''
+        #assert len(paths) % ncol == 0, 'Number of paths must be divisible by number of columns'
+
+        img = self.renders(paths, **kwargs)
+        imageio.imsave(savepath, img)
+        print(f'Saved {len(paths)} samples to: {savepath}')
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- rollouts ---------------------------------#

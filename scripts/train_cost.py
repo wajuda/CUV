@@ -5,13 +5,16 @@ import pdb
 #-----------------------------------------------------------------------------#
 #----------------------------------- setup -----------------------------------#
 #-----------------------------------------------------------------------------#
-
+#  This script is used to train a cost guide model for diffuser in the maze2d environment. 
 class Parser(utils.Parser):
     dataset: str = 'maze2d-large-v1'
-    config: str = 'config.maze2d_finetune'
-    exp: str = 'evolution_longer'   # experiment name to specify the save path
+    config: str = 'config.maze2d_cost'
+    exp: str = 'cost'   # experiment name to specify the save path
 
-args = Parser().parse_args('diffusion')
+diffusion_args = Parser().parse_args('diffusion')
+cost_args = Parser().parse_args('cost')
+
+
 
 #print(args)
 
@@ -60,6 +63,14 @@ model_config = utils.Config(
     dim_mults=args.dim_mults,
     device=args.device,
 )
+cost_model_config = utils.Config(
+    cost_args.cost_model,
+    savepath = (cost_args.savepath, 'cost_model_config.pkl'),
+    input_dim = observation_dim + neiborghor_nums,
+    output_dim = observation_dim,
+    hidden_dim = cost_args.hidden_dim,
+    device = cost_args.device, 
+)
 
 diffusion_config = utils.Config(
     args.diffusion,
@@ -77,7 +88,10 @@ diffusion_config = utils.Config(
     loss_discount=args.loss_discount,
     device=args.device,
 )
-
+cost_config = utils.Config(
+    args.cost,
+    savepath = (args.savepath, 'cost_config.pkl'),
+)
 trainer_config = utils.Config(
     utils.Trainer,
     savepath=(args.savepath, 'trainer_config.pkl'),
@@ -93,6 +107,20 @@ trainer_config = utils.Config(
     bucket=args.bucket,
     n_reference=args.n_reference,
     n_samples=args.n_samples,
+)  
+
+policy_config = utils.Config(
+    args.poicy,
+    savepath=(args.savepath, 'policy_config.pkl'),
+    normalizer = dataset.normalizer, 
+    sample_fn = n_step_guided_p_sample,
+    scale=args.scale,
+    n_guide_steps=args.n_guide_steps,
+    t_stopgrad=args.t_stopgrad,
+    scale_grad_by_std=args.scale_grad_by_std,
+    verbose=False,
+    return_diffusion = args.return_diffusion.
+
 )
 
 #-----------------------------------------------------------------------------#
@@ -100,8 +128,11 @@ trainer_config = utils.Config(
 #-----------------------------------------------------------------------------#
 
 model = model_config()
+cost_model = cost_model_config()
 
+cost = cost_config(cost_model)
 diffusion = diffusion_config(model)
+policy = policy_config(guide= cost, diffusion_model = diffusion)
 #diffusion.load_state_dict(args.diffusion_state_dict)
 
 trainer = trainer_config(diffusion, dataset, renderer)

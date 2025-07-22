@@ -26,7 +26,8 @@ plan_args_to_watch = [
     ('batch_size', 'b'),
     ##
     ('conditional', 'cond'),
-    ('replan', 'p')
+    ('replan', 'p'),
+    ('exp', 'E'),
 ]
 
 base = {
@@ -92,7 +93,7 @@ base = {
         'exp_name': watch(plan_args_to_watch),
         'suffix': '0',
 
-        'conditional': False,
+        'conditional': True,
         'replan': False,
 
         ## loading

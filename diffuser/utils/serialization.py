@@ -32,7 +32,7 @@ def load_config(*loadpath):
     print(f'[ utils/serialization ] Loaded config from {loadpath}')
     print(config)
     return config
-
+ 
 def load_diffusion(*loadpath, epoch='latest', device='cuda:0'):
     dataset_config = load_config(*loadpath, 'dataset_config.pkl')
     render_config = load_config(*loadpath, 'render_config.pkl')

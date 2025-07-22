@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from tap import Tap
 import pdb
+import sys
 
 from .serialization import mkdir
 from .git_utils import (
@@ -64,6 +65,9 @@ class Parser(Tap):
         '''
             Load parameters from config file
         '''
+
+        '''if args.config in sys.modules:
+            del sys.modules[args.config]'''
         dataset = args.dataset.replace('-', '_')
         print(f'[ utils/setup ] Reading config: {args.config}:{dataset}')
         module = importlib.import_module(args.config)

@@ -9,7 +9,7 @@ import diffuser.utils as utils
 
 Trajectories = namedtuple('Trajectories', 'actions observations')
 # GuidedTrajectories = namedtuple('GuidedTrajectories', 'actions observations value')
-
+ 
 class Policy:
 
     def __init__(self, diffusion_model, normalizer):

@@ -1,13 +1,14 @@
 import numpy as np
 import scipy.interpolate as interpolate
 import pdb
+import torch
 
 POINTMASS_KEYS = ['observations', 'actions', 'next_observations', 'deltas']
 
 #-----------------------------------------------------------------------------#
 #--------------------------- multi-field normalizer --------------------------#
 #-----------------------------------------------------------------------------#
-
+ 
 class DatasetNormalizer:
 
     def __init__(self, dataset, normalizer, path_lengths=None):
@@ -164,14 +165,27 @@ class LimitsNormalizer(Normalizer):
         '''
             x : [ -1, 1 ]
         '''
-        if x.max() > 1 + eps or x.min() < -1 - eps:
-            # print(f'[ datasets/mujoco ] Warning: sample out of range | ({x.min():.4f}, {x.max():.4f})')
-            x = np.clip(x, -1, 1)
+        if torch.is_tensor(x):
+            maxs = torch.tensor(self.maxs, device=x.device, dtype=x.dtype)
+            mins = torch.tensor(self.mins, device=x.device, dtype=x.dtype)
+            x = x.clip(-1, 1) 
+            #maxs = torch.tensor(self.maxs, device=x.device, dtype=x.dtype)
+            #mins = torch.tensor(self.mins, device=x.device, dtype=x.dtype)
 
-        ## [ -1, 1 ] --> [ 0, 1 ]
-        x = (x + 1) / 2.
+            x = (x+1) / 2
+            return x*(maxs-mins) + mins
 
-        return x * (self.maxs - self.mins) + self.mins
+        else:
+
+
+            if x.max() > 1 + eps or x.min() < -1 - eps:
+                # print(f'[ datasets/mujoco ] Warning: sample out of range | ({x.min():.4f}, {x.max():.4f})')
+                x = np.clip(x, -1, 1)
+
+            ## [ -1, 1 ] --> [ 0, 1 ]
+            x = (x + 1) / 2.
+
+            return x * (self.maxs - self.mins) + self.mins
 
 class SafeLimitsNormalizer(LimitsNormalizer):
     '''

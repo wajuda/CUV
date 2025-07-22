@@ -26,7 +26,8 @@ plan_args_to_watch = [
     ('batch_size', 'b'),
     ##
     ('conditional', 'cond'),
-    ('replan', 'p')
+    ('replan', 'p'),
+    ('exp', 'E'),
 ]
 
 base = {

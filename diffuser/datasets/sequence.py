@@ -4,10 +4,10 @@ import torch
 import pdb
 
 from .preprocessing import get_preprocess_fn
-from .d4rl import load_environment, sequence_dataset
+from .d4rl import load_environment, sequence_dataset, sequence_dataset_from_npz_file
 from .normalization import DatasetNormalizer
 from .buffer import ReplayBuffer
-
+ 
 Batch = namedtuple('Batch', 'trajectories conditions')
 ValueBatch = namedtuple('ValueBatch', 'trajectories conditions values')
 
@@ -15,13 +15,20 @@ class SequenceDataset(torch.utils.data.Dataset):
 
     def __init__(self, env='hopper-medium-replay', horizon=64,
         normalizer='LimitsNormalizer', preprocess_fns=[], max_path_length=1000,
-        max_n_episodes=10000, termination_penalty=0, use_padding=True):
-        self.preprocess_fn = get_preprocess_fn(preprocess_fns, env)
+        max_n_episodes=10000, termination_penalty=0, use_padding=True, finetune=False):
         self.env = env = load_environment(env)
+        self.preprocess_fn = get_preprocess_fn(preprocess_fns, env)
+
         self.horizon = horizon
         self.max_path_length = max_path_length
         self.use_padding = use_padding
-        itr = sequence_dataset(env, self.preprocess_fn)
+        if finetune:
+            print(f'[ datasets/mujoco ] Using finetune dataset: {env}')
+            itr = sequence_dataset_from_npz_file()
+        else:
+            print(f'[ datasets/mujoco ] Using dataset: {env}')
+            itr = sequence_dataset(env, self.preprocess_fn)
+        
 
         fields = ReplayBuffer(max_n_episodes, max_path_length, termination_penalty)
         for i, episode in enumerate(itr):
@@ -30,7 +37,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         self.normalizer = DatasetNormalizer(fields, normalizer, path_lengths=fields['path_lengths'])
         self.indices = self.make_indices(fields.path_lengths, horizon)
-
+ 
         self.observation_dim = fields.observations.shape[-1]
         self.action_dim = fields.actions.shape[-1]
         self.fields = fields

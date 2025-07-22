@@ -1,12 +1,12 @@
 import socket
 
 from diffuser.utils import watch
-
+ 
 #------------------------ base ------------------------#
 
 ## automatically make experiment names for planning
 ## by labelling folders with these args
-
+ 
 diffusion_args_to_watch = [
     ('prefix', ''),
     ('horizon', 'H'),
@@ -26,7 +26,9 @@ plan_args_to_watch = [
     ('batch_size', 'b'),
     ##
     ('conditional', 'cond'),
-    ('replan', 'p')
+    ('replan', 'p'),
+    ('exp','E'),
+    ('scale', 's')
 ]
 
 base = {
@@ -77,9 +79,27 @@ base = {
     },
 
     'plan': {
-        'batch_size': 1,
+        'batch_size': 10,
         'device': 'cuda',
+        'renderer':  'utils.Maze2dRendererBlock',
 
+        ## guide
+        'guide' : 'guides.guides.ValueGuide_maze2d_v5',
+        'policy' : 'guides.guided_policies.GuidedPolicy',
+
+        'verbose': True,
+        
+        ##  sample_kwargs
+        'n_guide_steps' :2,
+        'scale':0, 
+        #'exp': 'guide_s11_g79' ,
+        'exp': 'guidev5_state_s72_g79_all_block',
+        't_stopgrad' :2,
+        'scale_grad_by_std': True,
+        'return_diffusion':True,
+        'vis_diffusion_freq':10,
+
+ 
         ## diffusion model
         'horizon': 256,
         'n_diffusion_steps': 256,

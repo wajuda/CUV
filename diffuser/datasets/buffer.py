@@ -1,5 +1,5 @@
 import numpy as np
-
+ 
 def atleast_2d(x):
     while x.ndim < 2:
         x = np.expand_dims(x, axis=-1)
@@ -96,3 +96,22 @@ class ReplayBuffer:
             self._dict[key] = self._dict[key][:self._count]
         self._add_attributes()
         print(f'[ datasets/buffer ] Finalized replay buffer | {self._count} episodes')
+
+from collections import deque
+
+
+class ReplayBufferSAS:    # state-action-state buffer, trained for cost guide model
+    def __init__(self, buffer_size):
+        self.buffer = deque(maxlen=buffer_size)  # 自动限制长度
+
+    def add(self, state, action, reward, next_state, done):
+        self.buffer.append((state, action, reward, next_state, done))  # 直接追加
+
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        states = np.array([transition[0] for transition in batch])  # 批量转换为 numpy
+        actions = np.array([transition[1] for transition in batch])
+        rewards = np.array([transition[2] for transition in batch])
+        next_states = np.array([transition[3] for transition in batch])
+        dones = np.array([transition[4] for transition in batch])
+        return states, actions, rewards, next_states, dones
