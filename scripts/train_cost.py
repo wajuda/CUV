@@ -63,7 +63,7 @@ dataset_config = utils.Config(
     preprocess_fns=diffusion_args.preprocess_fns,
     use_padding=diffusion_args.use_padding,
     max_path_length=diffusion_args.max_path_length,
-    finetune=diffusion_args.finetune,
+    #finetune=diffusion_args.finetune,
 )
 dataset = dataset_config()
 observation_dim = dataset.observation_dim
@@ -128,6 +128,7 @@ cost_config = utils.Config(
     #maze_layout = maze_spec,
     normalizer=dataset.normalizer,
     neighbour_num = cost_args.neighbour_num,
+    loss_type = diffusion_args.loss_type,
 )
 
 
@@ -154,6 +155,7 @@ policy_config = utils.Config(
     scale_grad_by_std=diffusion_args.scale_grad_by_std,
     verbose=False,
     return_diffusion = diffusion_args.return_diffusion,
+
 )
 
  
@@ -166,14 +168,17 @@ trainer_config = utils.Config(
     #gradient_accumulate_every=diffusion_args.gradient_accumulate_every,
     #ema_decay=diffusion_args.ema_decay,
     conditional = diffusion_args.conditional,
-    sample_freq=diffusion_args.sample_freq,
+    #sample_freq=diffusion_args.sample_freq,
     save_freq=diffusion_args.save_freq,
-    label_freq=int(diffusion_args.n_train_steps // diffusion_args.n_saves),
+    label_freq=int(diffusion_args.n_train_episodes // diffusion_args.n_saves),
     save_parallel=diffusion_args.save_parallel,
     results_folder=diffusion_args.savepath,
     bucket=diffusion_args.bucket,
-    n_reference=diffusion_args.n_reference,
-    n_samples=diffusion_args.n_samples,
+    epsilon = diffusion_args.epsilon,
+    sample_batch_size = diffusion_args.sample_batch_size,
+    test_freq = diffusion_args.test_freq,
+    #n_reference=diffusion_args.n_reference,
+    #n_samples=diffusion_args.n_samples,
 )  
 
 
@@ -193,7 +198,7 @@ policy = policy_config(guide= cost, diffusion_model = diffusion)
 renderer = render_config()
 buffer = buffer_config()
 
-trainer = trainer_config(env= env, renderer = renderer, policy = policy, buffer = buffer, writer = writer)
+trainer = trainer_config(env= env, renderer = renderer, policy = policy, buffer = buffer, writer = writer, dataset = dataset)
 if diffusion_args.loadpath is not None:
     #assert False, "Loading from a path is not supported in cost training."
     trainer.load_from_pt_file(diffusion_args.loadpath)
@@ -205,8 +210,8 @@ if diffusion_args.loadpath is not None:
 #-----------------------------------------------------------------------------#
 
 utils.report_parameters(diffusion_model)   # 3.68M
-utils.report_parameters(cost_model)   #9.6k
-logger.info(f"Diffusion model and cost model initialized with {utils.count_parameters(diffusion_model)} and {utils.count_parameters(cost_model)} parameters respectively.")
+#utils.report_parameters(cost_model)   #9.6k
+#logger.info(f"Diffusion model and cost model initialized with {utils.count_parameters(diffusion_model)} and {utils.count_parameters(cost_model)} parameters respectively.")
 
 
 
@@ -215,9 +220,11 @@ logger.info(f"Diffusion model and cost model initialized with {utils.count_param
 #--------------------------------- main loop ---------------------------------#
 #-----------------------------------------------------------------------------#
 
-n_epochs = int(diffusion_args.n_train_steps // diffusion_args.n_steps_per_epoch)
+
+trainer.train(n_train_episodes = diffusion_args.n_train_episodes)
+'''n_epochs = int(diffusion_args.n_train_steps // diffusion_args.n_steps_per_epoch)
 
 for i in range(n_epochs):
     print(f'Epoch {i} / {n_epochs} | {diffusion_args.savepath}')
     trainer.train(n_train_steps=diffusion_args.n_steps_per_epoch)
-
+'''
