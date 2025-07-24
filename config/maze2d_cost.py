@@ -44,6 +44,17 @@ base = {
         'dim_mults': (1, 4, 8),
         'renderer': 'utils.Maze2dRenderer',
 
+        ## policy
+        'policy' : 'guides.guided_policies.GuidedPolicy',
+        'verbose': True,
+        'n_guide_steps' :2,
+        'scale':0, 
+        'sample_fn': 'utils.n_step_guided_p_sample',
+        #'exp': 'guide_s11_g79' ,
+        't_stopgrad' :2,
+        'scale_grad_by_std': True,
+        'return_diffusion':False,
+
         ## dataset
         'loader': 'datasets.GoalDataset',
         'termination_penalty': None,
@@ -55,10 +66,12 @@ base = {
 
         ## serialization
         'logbase': 'logs',
-        'prefix': 'diffusion_finetune/',
+        'prefix': 'diffusion_cost/',
         'exp_name': watch(diffusion_args_to_watch),
 
         ## training
+        'trainer': 'utils.CostTrainer',
+        'conditional': True, # whether to randomly set the goal to train.
         'n_steps_per_epoch': 800,
         'loss_type': 'l2',
         'n_train_steps': 2e4,
@@ -77,6 +90,23 @@ base = {
         ## loading
         'finetune': True,
         'loadpath': '/home/junda/diffuser/logs/maze2d-large-v1/diffusion/H384_T256/state_1960000.pt',
+    },
+
+    'cost': {
+        'model': 'models.MultiLinearLayer',
+        'hidden_dim': 64,
+        'n_layers': 2,
+        'neighbour_num': 4, # 4 neighbours, 8 neighbours, 9 include the center
+
+        'device': 'cuda',
+        'cost':'guides.guides.CostGuide_maze2d',
+
+        'buffer': 'datasets.buffer.ReplayBufferSAS',
+        'buffer_size': 4000,
+
+        
+        ## loading；
+        'loadpath': None,
     },
 
     'plan': {
@@ -108,10 +138,10 @@ base = {
 #------------------------ overrides ------------------------#
 
 '''
-    maze2d maze episode steps:
-        umaze: 150
-        medium: 250
-        large: 600
+maze2d maze episode steps:
+umaze: 150
+medium: 250
+large: 600
 '''
 
 maze2d_umaze_v1 = {

@@ -258,17 +258,20 @@ class Trainer(object):
 class CostTrainer(object):                                                              
     def __init__(
         self,
-        diffusion_model,
-        cost_model, 
-        env, 
-        dataset,
-        renderer,
-        policy,
-        buffer, # the experience  can be reused, because i want to use the relative position rather than the absolute position
-
+        #diffusion_model,
+        #cost_model, 
+        env = None,   #   for interaction with  the environment
+        #dataset,  #
+        renderer = None, #for rendering the trajectory
+        policy = None,  # including the cost, diffusion, normalizer,
+        buffer = None, # the experience can be reused, because i want to use the relative position rather than the absolute position
+        conditional = True,
+        writer = None,
+        logger = None,
         epsilon=0.1, # when planed position is far from the real position, we need to replan
         cost_weight=1.0, # the guide coefficiences of the cost model
-        ema_decay=0.995,
+        #ema_decay=0.995,  # do not use ema first, because it is just a simple mlp model for cost mapping
+        sample_batch_siz=10, # sample the highest value within sample_batch_size traj. 
         train_batch_size=32,
         train_lr=2e-5,
         gradient_accumulate_every=2,
@@ -285,17 +288,21 @@ class CostTrainer(object):
         bucket=None,
     ):
         super().__init__()
-        self.cost_model = cost_model
-        self.diffusion_model = diffusion_model
-        self.ema = EMA(ema_decay)
-        self.ema_cost_model = copy.deepcopy(self.cost_model)
-        self.update_ema_every = update_ema_every
+        self.policy = policy
+        self.cost_model = policy.guide
+        self.diffusion_model = policy.diffusion_model
+        self.writer = writer
+        self.logger = logger
+        self.buffer = buffer
+        #self.ema = EMA(ema_decay)
+        #self.ema_cost_model = copy.deepcopy(self.cost_model)
+        #self.update_ema_every = update_ema_every
         self.env = env
         self.epsilon = epsilon
         self.cost_weight = cost_weight
-        self.policy = policy
+        self.conditional = conditional
  
-        self.step_start_ema = step_start_ema
+        #self.step_start_ema = step_start_ema
         self.log_freq = log_freq
         self.sample_freq = sample_freq
         self.save_freq = save_freq
@@ -303,24 +310,25 @@ class CostTrainer(object):
         self.save_parallel = save_parallel
 
         self.batch_size = train_batch_size
-        self.gradient_accumulate_every = gradient_accumulate_every
+        #self.gradient_accumulate_every = gradient_accumulate_every
 
-        self.dataset = dataset
+
+        '''self.dataset = dataset
         self.dataloader = cycle(torch.utils.data.DataLoader(
             self.dataset, batch_size=train_batch_size, num_workers=1, shuffle=True, pin_memory=True
         ))
         self.dataloader_vis = cycle(torch.utils.data.DataLoader(
             self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
-        ))
+        ))'''
         self.renderer = renderer
-        self.optimizer = torch.optim.Adam(diffusion_model.parameters(), lr=train_lr)
+        self.optimizer = torch.optim.Adam(self.cost_model.parameters(), lr=train_lr)
 
         self.logdir = results_folder
         self.bucket = bucket
         self.n_reference = n_reference
         self.n_samples = n_samples
 
-        self.reset_parameters()
+        #self.reset_parameters()
         self.step = 0
 
     def reset_parameters(self):
@@ -337,33 +345,39 @@ class CostTrainer(object):
     #-----------------------------------------------------------------------------#
     def replay(self):
         if len(buffer) < self.batch_size:
-            return
+            return 0
         batch = buffer.sample(self.batch_size)
         batch = batch_to_device(batch)
-        loss, infos = self.cost_model.loss(*batch)
+        loss = self.policy.guide.loss(*batch)
         loss.backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
+        return loss
     def train(self, n_train_episodes):
 
         timer = Timer()
         for episode in range(n_train_episodes):
-            
+            #记录plan和执行的observation，可视化renderer
+            real_observation = np.zeros([self.env.max_episode_steps+1,self.env.observation_dim], dtype=np.float32)
+            plan_observation = np.zeros([self.env.max_episode_steps+1,self.env.observation_dim], dtype=np.float32)
             #actions_rollout = np.vstack((actions_rollout, action_rollout))
-            observation = env.reset()
-            if self.conditional = True:
-                env.set_target()
-            target = env.get_target()
+            observation = self.env.reset()
+            real_observation[0] = observation.copy()
+            plan_observation[0] = observation.copy()
+            if self.conditional == True:
+                self.env.set_target()
+            target = self.env.get_target()
             cond = {diffusion.horizon - 1: np.array([*target, 0, 0]),}
             t= 0 #t in the planing    step is for the execution
             total_reward = 0.0
-            for step in range(env.max_episode_steps):
+            for step in range(self.env.max_episode_steps):
                 if t == 0:
                     cond[0] = observation
 
-                    action, samples = policy(cond, batch_size=args.batch_size)
+                    action, samples = self.policy(cond, batch_size=args.batch_size)
                     actions = samples.actions[0]
                     sequence = samples.observations[0]
+                    value = samples.value[0]
                 
                 if t < len(sequence) - 1:
                     next_waypoint = sequence[t+1]
@@ -372,27 +386,30 @@ class CostTrainer(object):
                     next_waypoint[2:] = 0
 
                 action = next_waypoint[:2] - observation[:2] + (next_waypoint[2:] - observatoon[2:])
-                next_observation, reward, terminal, _ = env.step(action)
+                next_observation, reward, terminal, _ = self.env.step(action)
+                real_observation[step+1] = next_observation.copy()
+                plan_observation[step+1] = next_waypoint.copy()
+                x, y = self.policy.guide.get_training_data(observation, next_observation, next_waypoint)
                 total_reward += reward
-                score = env.get_normalized_score(total_reward)
+                score = self.env.get_normalized_score(total_reward)
                 print(
                     f't: {t} | r: {reward:.2f} |  R: {total_reward:.2f} | score: {score:.4f} | '
                     f'{action} | terminal: {terminal} | '
                 )
                 self.buffer.add(
-                    observation = observation,
-                    action = action, 
-                    next_observation = next_oobservation,
-                    next_watpoint = next_waypoint,
+                    data= x, # 4+4+neighbor_num
+                    label = y, #-cost
                 )
                 observation = next_observation
                 t += 1
-
                 if torch.norm(observation - next_waypoint) > self.epsilon:
                    t=0
-
-                self.replay()
-            
+                if step % self.update_guide_freq == 0:
+                    loss = self.replay()
+                    self.logger.info(f'episode{episode}step{step}loss{loss}')
+                    self.writer.add_scalar('loss', loss, episode * self.env.max_episode_steps + step)
+            # end of the episode
+            # i want to save the model log the loss, reward, score test the model.
             if episode % self.log_freq == 0:
                 print(f'Episode {episode} | Total Reward: {total_reward:.2f} | Score: {score:.4f} | t: {timer():8.4f}')
             if episode == 0 and self.sample_freq:
@@ -424,7 +441,7 @@ class CostTrainer(object):
         }
         savepath = os.path.join(self.logdir, f'state_{epoch}.pt')
         torch.save(data, savepath)
-        print(f'[ utils/training ] Saved model to {savepath}')
+        print(f'[ utils/cost-training ] Saved model to {savepath}')
         if self.bucket is not None:
             sync_logs(self.logdir, bucket=self.bucket, background=self.save_parallel)
 
@@ -442,9 +459,9 @@ class CostTrainer(object):
     def load_from_pt_file(self, loadpath):
         data = torch.load(loadpath)
         #self.step = data['step']
-        self.model.load_state_dict(data['model'])
-        self.ema_model.load_state_dict(data['ema']) 
-        print(f'[ utils/training ] Loaded model from {loadpath}')
+        self.diffusion_model.load_state_dict(data['model'])
+        #self.ema_model.load_state_dict(data['ema']) 
+        logger.info(f'load diffusion model from {loadpath}')
 
     #-----------------------------------------------------------------------------#
     #--------------------------------- rendering ---------------------------------#

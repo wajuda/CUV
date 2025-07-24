@@ -196,10 +196,10 @@ class TemporalValue(nn.Module):
         x = x.view(len(x), -1)
         out = self.final_block(torch.cat([x, t], dim=-1))
         return out
-
+ 
 class MultiLinearLayer(nn.Module):
     def __init__(self, input_dim, output_dim, hidden_dim = 64, num_layers = 4):
-        siper().__init__()
+        super().__init__()
         self.layers = nn.ModuleList()
         self.layers.append(nn.Linear(input_dim, hidden_dim))
         for _ in range(num_layers - 2):
@@ -207,11 +207,11 @@ class MultiLinearLayer(nn.Module):
         self.layers.append(nn.Linear(hidden_dim, output_dim))
         self.activation = nn.GELU()
 
-    def forward(self, x)；
+    def forward(self, x):
         for layer in self.layers[:-1]:
             x = self.activation(layer(x))
         x = self.layers[-1](x)
-        return x
+        return -x # value function is the negative distance 
 
 
 # class TemporalMixerUnet(nn.Module):

@@ -11,7 +11,7 @@ from .helpers import (
     apply_conditioning,
     Losses,
 )
-
+ 
 Sample = namedtuple('sample', 'trajectories values chains')
 
 def default_sample_fn(model, x, cond, t):

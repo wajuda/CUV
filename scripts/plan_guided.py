@@ -135,7 +135,7 @@ policy = GuidedPolicy_diffusion(guide = guide,
             verbose=False,
             return_diffusion = args.return_diffusion,
             )
-
+ 
 epsilon = 0.1
 
 def loop(episode=0):
@@ -188,6 +188,8 @@ def loop(episode=0):
             actions = samples.actions[0]
             sequence = samples.observations[0]
             value = samples.value[0]
+            print(sequence.shape)
+            assert false, 'ss'
             '''print(samples.value)
             print(samples.actions.shape, samples.observations.shape)
             print(actions.shape, sequence.shape)
