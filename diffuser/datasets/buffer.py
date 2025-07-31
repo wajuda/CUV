@@ -1,5 +1,6 @@
 import numpy as np
- 
+import random
+import torch
 def atleast_2d(x):
     while x.ndim < 2:
         x = np.expand_dims(x, axis=-1)
@@ -103,15 +104,58 @@ from collections import deque
 class ReplayBufferSAS:    # state-action-state buffer, trained for cost guide model
     def __init__(self, buffer_size):
         self.buffer = deque(maxlen=buffer_size)  # 自动限制长度
+        self.buffer_size = buffer_size
 
-    def add(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))  # 直接追加
+    def add(self, data, label):
+        self.buffer.append((data.float(), label.float()))  # 直接追加
 
-    def sample(self, batch_size):
+    '''def sample(self, batch_size):
         batch = random.sample(self.buffer, batch_size)
         states = np.array([transition[0] for transition in batch])  # 批量转换为 numpy
         actions = np.array([transition[1] for transition in batch])
         rewards = np.array([transition[2] for transition in batch])
         next_states = np.array([transition[3] for transition in batch])
         dones = np.array([transition[4] for transition in batch])
-        return states, actions, rewards, next_states, dones
+        return states, actions, rewards, next_states, dones'''
+
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        
+        # Unzip the batch into separate data and label lists
+        data_samples, label_samples = zip(*batch)
+        
+        # Stack into tensors with proper shapes
+        data_batch = torch.stack(data_samples)  # shape: (batch_size, 12)
+        label_batch = torch.stack(label_samples)  # shape: (batch_size, 1)
+        return data_batch, label_batch
+
+    def __len__(self):  # <-- Add this method to support len()
+        return len(self.buffer)
+
+    def save(self, path):
+        """保存buffer到文件"""
+        # 转换为list以便保存（deque不能直接保存）
+        buffer_list = list(self.buffer)
+        torch.save({
+            'buffer': buffer_list,
+            'buffer_size': self.buffer_size
+        }, path)
+
+    def load(self, path):
+        """将保存的数据直接加载到当前buffer中（不清空现有数据）"""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No buffer file at {path}")
+        
+        # 加载保存的数据
+        checkpoint = torch.load(path)
+        
+        # 检查buffer大小是否兼容
+        if checkpoint['buffer_size'] != self.buffer.maxlen:
+            print(f"Warning: Saved buffer size {checkpoint['buffer_size']} "
+                f"differs from current size {self.buffer.maxlen}")
+        
+        # 将数据追加到当前buffer
+        for data, label in checkpoint['buffer']:
+            self.buffer.append((data, label))
+        
+        #print(f"Loaded {len(checkpoint['buffer'])} samples into existing buffer")

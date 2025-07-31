@@ -1,5 +1,5 @@
 import socket
-
+ 
 from diffuser.utils import watch
 # this config file is used to train a cost guide model for diffuser in the maze2d environment. 
 #------------------------ base ------------------------#
@@ -48,7 +48,7 @@ base = {
         'policy' : 'guides.guided_policies.GuidedPolicy',
         'verbose': True,
         'n_guide_steps' :2,
-        'scale':1000, 
+        'scale':10000, 
         'sample_fn': 'utils.n_step_guided_p_sample',
         #'exp': 'guide_s11_g79' ,
         't_stopgrad' :2,
@@ -83,8 +83,10 @@ base = {
         'save_freq': 5,
         #'sample_freq': 10,
         'test_freq' : 5,
+        'n_test_samples': 1,
         'n_saves': 20,
-        'epsilon': 0.5, # the distance need to replan
+        'epsilon': 1.0, # the distance need to replan
+        'update_guide_freq':5,
         'save_parallel': False,
         #'n_reference': 50,
         #'n_samples': 10,

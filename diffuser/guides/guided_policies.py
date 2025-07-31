@@ -5,13 +5,13 @@ import einops
 import pdb
 import diffuser.utils as utils
 # from diffusion.datasets.preprocessing import get_policy_preprocess_fn
-  
+   
 Trajectories = namedtuple('Trajectories', 'actions observations')
 GuidedTrajectories = namedtuple('GuidedTrajectories', 'actions observations value')
 GuidedTrajectories_diffusion = namedtuple('GuidedTrajectories', 'actions observations value obs_chains')
 class GuidedPolicy:
 
-    def __init__(self, guide, diffusion_model, normalizer=None, preprocess_fns=None, **sample_kwargs):
+    def __init__(self, diffusion_model, guide=None, normalizer=None, preprocess_fns=None, **sample_kwargs):
         self.guide = guide
         self.diffusion_model = diffusion_model
         self.normalizer = normalizer

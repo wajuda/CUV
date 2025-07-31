@@ -3,7 +3,7 @@ import torch
 from torch import nn
 import pdb
 from collections import namedtuple
-
+ 
 import diffuser.utils as utils
 from .helpers import (
     cosine_beta_schedule,
@@ -14,7 +14,7 @@ from .helpers import (
  
 Sample = namedtuple('sample', 'trajectories values chains')
 
-def default_sample_fn(model, x, cond, t):
+def default_sample_fn(model, x, cond, t, **kwargs):
     model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, t=t)
     model_std = torch.exp(0.5 * model_log_variance)
 

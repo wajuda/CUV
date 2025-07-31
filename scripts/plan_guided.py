@@ -50,6 +50,20 @@ args = Parser().parse_args('plan')
 #assert False, join(args.savepath, 'plan.log')
 
 # logger = utils.Logger(args)
+logger = logging.getLogger("plan_guided")
+logger.setLevel(logging.INFO)
+
+# 2. 配置日志输出到文件
+file_handler = logging.FileHandler(args.savepath + '/train.log', mode = 'w')
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler = logging.StreamHandler()  # 同时输出到控制台
+
+
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 #env = datasets.load_environment(args.dataset)
 env = datasets.load_environment(args.real_dataset)
@@ -115,8 +129,8 @@ maze_spec = "OOOOOOOOOOOO\\"+\
 
 guide_config = utils.Config(
     args.guide,
-    #maze_layout=env.unwrapped.str_maze_spec, 
-    maze_layout = maze_spec,
+    maze_layout=env.unwrapped.str_maze_spec, 
+    #maze_layout = maze_spec,
     normalizer=dataset.normalizer,
 )
 
@@ -143,20 +157,20 @@ def loop(episode=0):
     actions_rollout = np.empty((0, 2), dtype=np.float32)
     #observation = env.reset()
     #observation = env.reset_to_location(np.array([3, 1]))  # [x, y, vx, vy]
-    observation = env.reset_to_location(np.array([7, 2]))
+    observation = env.reset_to_location(np.array([1, 1]))
     print(f'Environment: {args.dataset} | {env.unwrapped.spec.id}')
     print(observation)
 
-    if args.conditional:
+    '''if args.conditional:
         print('Resetting target')
-        env.set_target()
+        env.set_target()'''
 
     ## set conditioning xy position to be the goal
     #env._target = np.array([2, 2])  # [x, y] for maze2d
     ## randomly set the target between the walls
-    '''target_x = np.random.uniform(1.75, 2.25)  #(2.5, 3.5) #
-    target_y = np.random.uniform(2.25, 2.75)    #(2.5, 3.5) #
-    env._target = np.array([target_x, target_y])  # [x, y] for maze2d'''
+    target_x = np.random.uniform(6.75, 7.25)  #(2.5, 3.5) #
+    target_y = np.random.uniform(5.75, 6.25)    #(2.5, 3.5) #
+    env._target = np.array([target_x, target_y])  # [x, y] for maze2d
     '''target_x = np.random.uniform(2.8, 3.2)  #(2.5, 3.5) #
     target_y = np.random.uniform(1.8, 2.2)    #(2.5, 3.5) #
     env._target = np.array([target_x, target_y])  # [x, y] for maze2d'''
@@ -178,6 +192,7 @@ def loop(episode=0):
     for t in range(env.max_episode_steps):
 
         state = env.state_vector().copy()
+        assert (state == observation).all(), f'state is different'
 
         ## can replan if desired, but the open-loop plans are good enough for maze2d
         ## that we really only need to plan once
@@ -188,8 +203,6 @@ def loop(episode=0):
             actions = samples.actions[0]
             sequence = samples.observations[0]
             value = samples.value[0]
-            print(sequence.shape)
-            assert false, 'ss'
             '''print(samples.value)
             print(samples.actions.shape, samples.observations.shape)
             print(actions.shape, sequence.shape)
@@ -216,7 +229,7 @@ def loop(episode=0):
         else:
             terminal=True
             break'''
-        action_rollout = next_waypoint[:2] - state[:2]# + (next_waypoint[2:] - state[2:])
+        action_rollout = next_waypoint[:2] - state[:2] + (next_waypoint[2:] - state[2:])
         #print(f't: {t} | action_rollout: {action_rollout} | pos_diff {next_waypoint[:2]-state[:2]} | v_diff {next_waypoint[2:]-state[2:]}' )
         #action_rollout = actions[t+1]
         actions_rollout = np.vstack((actions_rollout, action_rollout))
@@ -241,6 +254,10 @@ def loop(episode=0):
         next_observation, reward, terminal, _ = env.step(action_rollout)
         total_reward += reward
         score = env.get_normalized_score(total_reward)
+
+        #logger.info(f'episode{episode}start{observation}')
+        #logger.info(f'plan_end{next_waypoint}-arrive_end{next_observation}')
+        #logger.info(f'action{action_rollout}-dis{next_waypoint-next_observation}-norm{np.linalg.norm(next_waypoint-next_observation)}')
 
         if 'maze2d' in args.dataset:
             xy = next_observation[:2]
@@ -303,7 +320,7 @@ def loop(episode=0):
     ## save result as a json file
     
 #loop()
-log_path = join(args.savepath, 'plan.log')
+'''log_path = join(args.savepath, 'plan.log')
 logging.basicConfig(
     filename=log_path,
     level=logging.INFO,
@@ -316,7 +333,7 @@ logging.info(f'Environment: {args.real_dataset} | {env.unwrapped.spec.id}')
 logging.info(f'Diffusion model: {args.diffusion_loadpath} | Epoch: {args.diffusion_epoch}')
 logging.info(f'Guide: {args.guide}')
 assert os.path.exists(log_path), f'Log file {log_path} does not exist. Please check the logging configuration.'
-
+'''
 all_data = {}
 total_num = 0
 total_episode = 10
@@ -342,8 +359,8 @@ while valid_episode < total_episode:
         rollout, actions_rollout, sequence, actions, target, terminal, score= loop(valid_episode)
     valid_episode +=1
     scores.append(score)
-    print(f'Episode {valid_episode}: Score = {score:.4f}')
-    logging.info(f'Episode {valid_episode}: Score = {score:.4f}') 
+    #print(f'Episode {valid_episode}: Score = {score:.4f}')
+    logger.info(f'Episode {valid_episode}: Score = {score:.4f}') 
     '''if terminal:
         
         valid_rollout, valid_actions_rollout = get_valid_new_path(rollout, actions_rollout)
@@ -370,8 +387,8 @@ np.savez_compressed(
     join(args.savepath, f'all_data_{total_episode}.npz'),
     **all_data
 )
-logging.info(f'Episode {total_episode}: Mean Score = {np.array(scores).mean():.4f}') 
+logger.info(f'Episode {total_episode}: Mean Score = {np.array(scores).mean():.4f}') 
 print(f'Saved all data to {join(args.savepath, "all_data.npz")}')
 
-logging.shutdown()  # 确保日志写入文件
+#logging.shutdown()  # 确保日志写入文件
 

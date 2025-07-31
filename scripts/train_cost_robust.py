@@ -5,20 +5,21 @@ import logging
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from diffuser.models.diffusion import n_step_guided_p_sample, default_sample_fn
-
-
+import numpy as np
+ 
 
 
 
 #-----------------------------------------------------------------------------#
 #----------------------------------- setup -----------------------------------#
 #-----------------------------------------------------------------------------#
-#  This script is used to train a cost guide model for diffuser in the maze2d environment. 
+#  This script is used to train a cost guide model for diffuser in the maze2d environment.
+# the robust version means interact with no guide, then train cost to  convergence, finally test with different guide scale.
 class Parser(utils.Parser):
     dataset: str = 'maze2d-large-v1'
     real_dataset: str = 'maze2d-large-v1'
-    config: str = 'config.maze2d_cost'
-    exp: str = 'cost_compare_debug'   # experiment name to specify the save path
+    config: str = 'config.maze2d_cost_robust'
+    #exp: str = 'cost_robust_debug'   # experiment name to specify the save path
 
 diffusion_args = Parser().parse_args('diffusion')
 cost_args = Parser().parse_args('cost')
@@ -173,15 +174,17 @@ trainer_config = utils.Config(
     conditional = diffusion_args.conditional,
     #sample_freq=diffusion_args.sample_freq,
     save_freq=diffusion_args.save_freq,
-    label_freq=int(diffusion_args.n_train_episodes // diffusion_args.n_saves),
+    #label_freq=int(diffusion_args.n_train_episodes // diffusion_args.n_saves),
     save_parallel=diffusion_args.save_parallel,
     results_folder=diffusion_args.savepath,
     bucket=diffusion_args.bucket,
     epsilon = diffusion_args.epsilon,
-    update_guide_freq = diffusion_args.update_guide_freq,
+    #update_guide_freq = diffusion_args.update_guide_freq,
     sample_batch_size = diffusion_args.sample_batch_size,
-    test_freq = diffusion_args.test_freq,
-    n_test_samples = diffusion_args.n_test_samples,
+    n_collect_episodes = diffusion_args.n_collect_episodes,
+    n_train_epochs = diffusion_args.n_train_epochs,
+    vis_test_freq = diffusion_args.vis_test_freq,
+    vis_collect_freq = diffusion_args.vis_collect_freq,
     #n_reference=diffusion_args.n_reference,
     #n_samples=diffusion_args.n_samples,
 )  
@@ -247,10 +250,22 @@ utils.report_parameters(diffusion_model)   # 3.68M
 #-----------------------------------------------------------------------------#
 
 
-trainer.train(n_train_episodes = int(diffusion_args.n_train_episodes))
-'''n_epochs = int(diffusion_args.n_train_steps // diffusion_args.n_steps_per_epoch)
+# collect dataset
+trainer.collect()
 
-for i in range(n_epochs):
-    print(f'Epoch {i} / {n_epochs} | {diffusion_args.savepath}')
-    trainer.train(n_train_steps=diffusion_args.n_steps_per_epoch)
-'''
+# train cost model
+trainer.train()
+
+# test with diffetent scale
+scales = cost_args.scales
+scores = []
+rewards = []
+for i in range(diffusion_args.n_test_samples):
+    for scale in scales:
+        trainer.test(scale = scale, episode = i)
+    scores.append(trainer.scores)
+    rewards.append(trainer.rewards)
+
+for i, scale in enumerate(scales):
+    logger.info(f'scale{scale} mean-score: {np.array(scores)[:,i].mean()} mean_reward: {np.array(rewards)[:,i].mean()}')
+

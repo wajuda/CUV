@@ -5,7 +5,7 @@ import numpy as np
 import diffuser.utils as utils
  
 # 目前的想法是输入地图和当前位置算出cost,返回grad.
-
+ 
 from scipy.ndimage import distance_transform_edt
 from diffuser.models import MultiLinearLayer
 
@@ -567,7 +567,7 @@ class ValueGuide_maze2d_v5(nn.Module): #r(x,x')对x'求导，x'相对于x离目�
 class CostGuide_maze2d(nn.Module): #八邻居，-1/x
     def __init__(self, model, maze_layout=None, normalizer=None, device="cuda", loss_type='l2', neighbour_num=4, action_dim=2, state_dim=2):
         super().__init__()
-        # 迷宫布局定义
+        # 迷宫布局定义 
         self.maze_layout = maze_layout or \
             "############\\"+\
             "#OOOO#OOOOO#\\"+\
@@ -692,15 +692,20 @@ class CostGuide_maze2d(nn.Module): #八邻居，-1/x
 
         trajectories = trajectories.requires_grad_()
         x = self._preprocess_trajectories(trajectories)
-        print(x)
-        y = self(x, *args).sum(dim = [-1, -2])  # [b,
-        grad = torch.autograd.grad(y, trajectories)[0]
+        
+        y = self(x).sum(dim=[-1,-2])  # [b,
+        
+        grad = torch.autograd.grad(y.mean(), trajectories)[0]
+        
         return y, grad
 
-    def get_training_date(self, observation, next_observation, next_waypoint):
+    def get_training_data(self, observation, next_observation, next_waypoint):
         """
             处理获得输进网络的数据 （x = 4+4+neighbour_num, y = 1）
         """
+        observation = torch.from_numpy(observation)
+        next_observation = torch.from_numpy(next_observation)
+        next_waypoint = torch.from_numpy(next_waypoint)
         
         grid_coord = observation[:self.state_dim]
         indice = torch.round(grid_coord)
@@ -746,7 +751,7 @@ if __name__ == "__main__":
     guide = CostGuide_maze2d(model, maze_layout = maze_layout, neighbour_num = 4)
 
 
-    x, y = guide.get_training_date(
+    x, y = guide.get_training_data(
         observation=torch.tensor([7.1, 2.1, 0.13, 0.0]),
         next_observation=torch.tensor([7.2, 2.2, 1.0, -0.2]),
         next_waypoint=torch.tensor([7.1, 2.2, -0. , -0.1])
