@@ -738,6 +738,9 @@ class CostRobustTrainer(CostTrainer):
 
         self.logdir = results_folder
         self.bucket = bucket
+
+        self.start = None
+        self.target = None # for assign the test task
     def collect(self, scale = 0):
         """
             用于收集数据，存储在buffer里
@@ -846,8 +849,71 @@ class CostRobustTrainer(CostTrainer):
             self.logger.info(f'test-episode{episode}start{self.start}end{self.target}')
         else:
             policy = self.policy
-            policy.scale = scale
+            policy.sample_kwargs["scale"] = scale
             observation = self.env.reset_to_location(self.start)
+    
+        cond = {self.diffusion.horizon - 1: np.array([*self.target, 0, 0]),}
+        total_reward = 0.0
+        rollout = [observation.copy()]
+        for t in range(self.env.max_episode_steps):
+            if t == 0:
+                cond[0] = observation
+
+                action, samples = policy(cond, batch_size=self.sample_batch_size)
+                actions = samples.actions[0]
+                sequence = samples.observations[0]
+                value = samples.value[0]
+
+            if t < len(sequence) - 1:
+                next_waypoint = sequence[t+1]
+            else:
+                next_waypoint = sequence[-1].copy()
+                next_waypoint[2:] = 0
+
+            action = next_waypoint[:2] - observation[:2] + (next_waypoint[2:] - observation[2:])
+            next_observation, reward, terminal, _ = self.env.step(action)
+            rollout.append(next_observation.copy())
+            #real_observation[step+1] = next_observation.copy()
+            #plan_observation[step+1] = next_waypoint.copy()
+            #x, y = self.policy.guide.get_training_data(observation, next_observation, next_waypoint)
+            total_reward += reward
+            score = self.env.get_normalized_score(total_reward)
+            observation = next_observation
+        if episode % self.vis_test_freq == 0:
+            savepath = os.path.join(self.logdir, f'test-scale{scale}-{episode}.png')
+            self.renderer.composite(savepath, np.array(rollout)[None], ncol=1)
+            savepath = os.path.join(self.logdir, f'test-scale{scale}-plan{episode}.png')
+            self.renderer.composite(savepath, samples.observations)
+        self.scores.append(score)
+        self.rewards.append(total_reward)
+        self.logger.info(f'test-scale{scale}-episode-score{score}-reward{total_reward}')
+
+    def test_task(self, scale=0, episode=0, start = None, target = None):
+        if start:
+            self.start = start
+            observation= self.env.reset_to_location(self.start)
+        else:
+            observation = self.env.reset()
+            self.start = observation[:2]
+
+
+        if target:
+            self.target = target
+        else:
+            if self.conditional == True:
+                self.env.set_target()
+            self.target = self.env.get_target()
+        self.logger.info(f'test-episode{episode}start{self.start}end{self.target}')
+        if scale ==0:
+            policy = self.baseline_policy
+            self.scores = []
+            self.rewards = []
+            
+        else:
+            policy = self.policy
+            #print(policy.sample_kwargs)
+            policy.sample_kwargs["scale"] = scale
+            #assert False, policy.sample_kwargs
     
         cond = {self.diffusion.horizon - 1: np.array([*self.target, 0, 0]),}
         total_reward = 0.0

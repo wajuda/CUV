@@ -44,7 +44,7 @@ base = {
         'loss_discount': 1,
         'predict_epsilon': False,
         'dim_mults': (1, 4, 8),
-        'renderer': 'utils.Maze2dRenderer',
+        'renderer': 'utils.Maze2dRendererBlock',
 
         ## policy
         'policy' : 'guides.guided_policies.GuidedPolicy',
@@ -73,7 +73,7 @@ base = {
 
         ## trainer
         'trainer': 'utils.CostRobustTrainer',
-        'exp' : 'cost_robust_2',
+        'exp' : 'cost_robust_3',
         'conditional': True, # whether to randomly set the goal to train.
         #'n_steps_per_epoch': 800,
         'loss_type': 'l2',
@@ -111,9 +111,9 @@ base = {
         'model': 'models.MultiLinearLayer',
         'hidden_dim': 64,
         'n_layers': 4,
-        'neighbour_num': 4, # 4 neighbours, 8 neighbours, 9 include the center
-        'scales' : [0, 10, 100, 1000, 10000, 100000, 1000000], # different guide scale for test
-
+        'neighbour_num': 8, # 4 neighbours, 8 neighbours, 9 include the center
+        #'scales' : [0, 10, 100, 1000, 10000, 100000, 1000000], # different guide scale for test
+        'scales' : [0, 10, 30, 50],
         'device': 'cuda',
         'cost':'guides.guides.CostGuide_maze2d',
 
@@ -122,7 +122,7 @@ base = {
 
         
         ## loading；
-        'loadpath': None,
+        'loadpath': '/home/junda/diffuser/logs/maze2d-large-v1/diffusion_cost/H384_T256_Ecost_robust_2/cost_model_4.pt',
     },
 
     'plan': {
