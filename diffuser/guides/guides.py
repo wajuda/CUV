@@ -564,7 +564,7 @@ class ValueGuide_maze2d_v5(nn.Module): #r(x,x')对x'求导，x'相对于x离目�
         return y, grad
 
 
-class CostGuide_maze2d(nn.Module): #八邻居，-1/x
+class CostGuide_maze2d(nn.Module): 
     def __init__(self, model, maze_layout=None, normalizer=None, device="cuda", loss_type='l2', neighbour_num=4, action_dim=2, state_dim=2):
         super().__init__()
         # 迷宫布局定义 
@@ -733,6 +733,80 @@ class CostGuide_maze2d(nn.Module): #八邻居，-1/x
         loss = self.loss_fn(pred_y, y)
         return loss
 
+class CostPositionGuide_maze2d(CostGuide_maze2d):  #execution based only position, w/o velocity
+    def __init__(self, model, maze_layout=None, normalizer=None, device="cuda", loss_type='l2', neighbour_num=4, action_dim=2, state_dim=2):
+        super().__init__(model = model, maze_layout=maze_layout, normalizer=normalizer, device=device, loss_type=loss_type, neighbour_num=neighbour_num, action_dim=action_dim, state_dim=state_dim)
+        # 迷宫布局定义 
+       
+    
+
+        
+
+    def _preprocess_trajectories(self, trajectories):
+        # preprocess trajectories to match the format for the model input
+        # trajectories [b, H, 6] -> [b*(H-1), 4(current state) + 4(next_relatice_state) + self.neighbour_num]
+        # model output [b*(H-1), 1]
+        # value [b, 1] one velue for each trajectory
+        #for train
+        sequences = self.normalizer.unnormalize(trajectories[:,:,self.action_dim:], 'observations')
+        #for test
+        #print("trajectories shape:", trajectories.shape)
+        #sequences = trajectories[:,:,self.action_dim:]
+        #print(sequences.shape)
+        grid_coords = sequences[:,:,:self.state_dim].to(self.device)
+        #print(grid_coords.shape)
+        
+        
+        # 四舍五入并转为整数索引 (需要clamp防止越界)
+        indices = torch.round(grid_coords).long().to(self.device)
+        #print(indices)
+        indices = indices.clip(self.bound_min, self.bound_max).detach()
+        current_indices = indices[:, :-1, :].detach()  # 去掉最后一个位置的索引
+        #print(indices)
+
+
+        current_relative_grid_coords = (grid_coords[:, :-1, :] - current_indices.float()).detach()  # 去掉最后一个位置
+        next_relative_grid_coords = grid_coords[:, 1:, :] - current_indices.float()  # 去掉第一个位置
+
+        #relative_grid_coords = (grid_coords - indices)
+
+        #current_relative_grid_coords = relative_grid_coords[:, :-1, :].detach()  # 去掉最后一个位置
+        #next_relative_grid_coords = relative_grid_coords[:, 1:, :] # 去掉第一个位置
+        #current_velocity = sequences[:, :-1, self.state_dim:].to(self.device).detach()  # 去掉最后一个位置的速度
+        #next_velocity = sequences[:, 1:, self.state_dim:].to(self.device) # 去掉第一个位置的速度
+        current_neighbours = self.neighbours[current_indices[:, :, 0], current_indices[:, :, 1]].float().detach()  # 去掉最后一个位置的邻居
+        
+
+        out =  torch.cat((current_relative_grid_coords, next_relative_grid_coords, current_neighbours), dim=-1).to(self.device)
+        
+        
+
+        # 拼接起来
+        return  out
+
+
+    def get_training_data(self, observation, next_observation, next_waypoint):
+        """
+            处理获得输进网络的数据 （x = 2+2+neighbour_num, y = 1）
+        """
+        observation = torch.from_numpy(observation)
+        next_observation = torch.from_numpy(next_observation)
+        next_waypoint = torch.from_numpy(next_waypoint)
+        
+        grid_coord = observation[:self.state_dim]
+        indice = torch.round(grid_coord)
+        indice = indice.clip(self.bound_min.to('cpu'), self.bound_max.to('cpu')).long()
+
+        x = torch.cat((
+            grid_coord - indice.float(),
+            next_waypoint[:self.state_dim] - indice.float(),
+            self.neighbours[indice[0], indice[1]].float().to('cpu'),
+        ))
+
+        y = -torch.norm(next_observation[:2] - next_waypoint[:2])
+        return x, y  # 计算下一个位置到下一个目标点的距离
+
+
 
 
 if __name__ == "__main__":
@@ -746,31 +820,31 @@ if __name__ == "__main__":
                   "##O#O#O#O###\\"+\
                   "#OO#OOO#OGO#\\"+\
                   "############"
-    model = MultiLinearLayer(input_dim=12, output_dim=1)
+    model = MultiLinearLayer(input_dim=8, output_dim=1)
     #guide = ValueGuide_maze2d_v4(maze_layout=maze_layout, device="cuda")
-    guide = CostGuide_maze2d(model, maze_layout = maze_layout, neighbour_num = 4)
+    guide = CostPositionGuide_maze2d(model, maze_layout = maze_layout, neighbour_num = 4)
 
 
-    x, y = guide.get_training_data(
+    '''x, y = guide.get_training_data(
         observation=torch.tensor([7.1, 2.1, 0.13, 0.0]),
         next_observation=torch.tensor([7.2, 2.2, 1.0, -0.2]),
         next_waypoint=torch.tensor([7.1, 2.2, -0. , -0.1])
     )
     print("x:", x)
-    print("y:", y)
+    print("y:", y)'''
     #trajectories = torch.tensor([[[0.1, 0.1], [0.2, 0.2], [0.3, 0.3]]], device="cuda")  # 示例轨迹
     #values = guide(trajectories)
     #print(values)
     #trajectories = torch.randn(1, 5, 2).requires_grad_(True)  # [batch, horizon, 2]
-    '''
+    
     trajectories = torch.tensor([[[0,0,1.1, 0.1,0.01,0], [0, 0, 2.2, -0,0.01,0], [0,0,3.0, -0.2,-0.01,0], [0,0,2.3, -0.1,0.02,0], [0,0,4.1, 0.2, 0.0,0.0]]]).requires_grad_(True)  # 示例轨迹
     for i in range(10):
         y, grad = guide.gradients(trajectories)
         print("Values:", y)
         print("Gradients:", grad)
         #print("Gradients shape:", grad.shape)
-        trajectories = trajectories +  100*grad
-    '''
+        trajectories = trajectories +  1000000*grad
+    
     '''optimizer = torch.optim.Adam(guide.parameters(), lr=0.01)
     x = torch.tensor([[[ 0.1000,  0.1000,  0.0100,  0.0000,  1.2000,  0.0000,  0.0100,
            0.0000,  1.0000,  1.0000,  0.0000,  1.0000],

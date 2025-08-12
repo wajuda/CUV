@@ -65,15 +65,15 @@ base = {
         'clip_denoised': True,
         'use_padding': False,
         'max_path_length': 40000,
- 
+
         ## serialization
         'logbase': 'logs',
         'prefix': 'diffusion_cost/',
         'exp_name': watch(diffusion_args_to_watch),
  
         ## trainer
-        'trainer': 'utils.CostRobustRandomTrainer',
-        'exp' : 'cost_robust_block_4neighbour_randomgoal',
+        'trainer': 'utils.CostRobustPositionTrainer',
+        'exp' : 'cost_position_robust_test_task',
         'conditional': True, # whether to randomly set the goal to train.
         #'n_steps_per_epoch': 800,
         'loss_type': 'l2',
@@ -113,18 +113,17 @@ base = {
         'n_layers': 4,
         'neighbour_num': 4, # 4 neighbours, 8 neighbours, 9 include the center
         #'scales' : [0, 10, 100, 1000, 10000, 100000, 1000000], # different guide scale for test
-        'scales' : [0, 10, 30, 50, 100, 1000, 10000, 100000],
+        'scales' : [0, 10, 30, 50, 100, 1000, 10000, 100000, 10000000000000],
         'device': 'cuda',
-        'cost':'guides.guides.CostGuide_maze2d',
+        'cost':'guides.guides.CostPositionGuide_maze2d',
 
         'buffer': 'datasets.buffer.ReplayBufferSAS',
         'buffer_size': 40000, # 25 * 800
 
         
         ## loading；
-        'loadpath': '/home/junda/diffuser/logs/maze2d-large-v1/diffusion_cost/H384_T256_Ecost_robust_block_4neighbour/cost_model_4.pt',
+        'loadpath': '/home/junda/diffuser/logs/maze2d-large-v1/diffusion_cost/H384_T256_Ecost_position_robust/cost_model_4.pt',
     },
-
     'plan': {
         'batch_size': 1,
         'device': 'cuda',

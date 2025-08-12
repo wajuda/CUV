@@ -7,7 +7,7 @@ from torch.utils.tensorboard import SummaryWriter
 from diffuser.models.diffusion import n_step_guided_p_sample, default_sample_fn
 import numpy as np
  
-
+ 
 
 
 #-----------------------------------------------------------------------------#
@@ -276,32 +276,33 @@ utils.report_parameters(diffusion_model)   # 3.68M
 #scales = cost_args.scales
 
 #------------random test---------------------
-scales = cost_args.scales
-scores = []
-rewards = []
-for i in range(diffusion_args.n_test_samples):
-    for scale in scales:
-        trainer.test(scale = scale, episode = i)
-    scores.append(trainer.scores)
-    rewards.append(trainer.rewards)
+random_test = False
+if random_test:
+    scales = cost_args.scales
+    scores = []
+    rewards = []
+    for i in range(diffusion_args.n_test_samples):
+        for scale in scales:
+            trainer.test(scale = scale, episode = i)
+        scores.append(trainer.scores)
+        rewards.append(trainer.rewards)
 
-for i, scale in enumerate(scales):
-    logger.info(f'scale{scale} mean-score: {np.array(scores)[:,i].mean()} mean_reward: {np.array(rewards)[:,i].mean()}')
-
-
-#-------------task test
-'''scales = [0, 100, 10000 ,1000000, 100000000, 100000000000000000]
-scores = []
-rewards = []
-starts = [[1,1],[7,2],[1,9]]
-target = [7.0, 10.0]
-trainer.vis_test_freq = 1
-#for i in range(diffusion_args.n_test_samples):
-for i, start in enumerate(starts):
-    for scale in scales:
-        trainer.test_task(scale = scale, episode = i, start = start, target= target)
-    scores.append(trainer.scores)
-    rewards.append(trainer.rewards)
-
-for i, scale in enumerate(scales):
-    logger.info(f'scale{scale} mean-score: {np.array(scores)[:,i].mean()} mean_reward: {np.array(rewards)[:,i].mean()}')'''
+    for i, scale in enumerate(scales):
+        logger.info(f'scale{scale} mean-score: {np.array(scores)[:,i].mean()} mean_reward: {np.array(rewards)[:,i].mean()}')
+else:
+    #-------------task test
+    scales = [0, 10, 30 ,50]
+    scores = []
+    rewards = []
+    starts = [[1,1],[7,2],[1,9]]
+    target = [7.0, 10.0]
+    trainer.vis_test_freq = 1
+    #for i in range(diffusion_args.n_test_samples):
+    for i, start in enumerate(starts):
+        for scale in scales:
+            trainer.test_task(scale = scale, episode = i, start = start, target= target)
+        scores.append(trainer.scores)
+        rewards.append(trainer.rewards)
+ 
+    for i, scale in enumerate(scales):
+        logger.info(f'scale{scale} mean-score: {np.array(scores)[:,i].mean()} mean_reward: {np.array(rewards)[:,i].mean()}')

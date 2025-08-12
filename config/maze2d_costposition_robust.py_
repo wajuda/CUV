@@ -65,15 +65,15 @@ base = {
         'clip_denoised': True,
         'use_padding': False,
         'max_path_length': 40000,
- 
+
         ## serialization
         'logbase': 'logs',
         'prefix': 'diffusion_cost/',
         'exp_name': watch(diffusion_args_to_watch),
  
         ## trainer
-        'trainer': 'utils.CostRobustRandomTrainer',
-        'exp' : 'cost_robust_block_4neighbour_randomgoal',
+        'trainer': 'utils.CostRobustTrainer',
+        'exp' : 'cost_robust_block_4neighbour_test_task',
         'conditional': True, # whether to randomly set the goal to train.
         #'n_steps_per_epoch': 800,
         'loss_type': 'l2',
@@ -113,7 +113,7 @@ base = {
         'n_layers': 4,
         'neighbour_num': 4, # 4 neighbours, 8 neighbours, 9 include the center
         #'scales' : [0, 10, 100, 1000, 10000, 100000, 1000000], # different guide scale for test
-        'scales' : [0, 10, 30, 50, 100, 1000, 10000, 100000],
+        'scales' : [0, 10, 30, 50, 100, 1000],
         'device': 'cuda',
         'cost':'guides.guides.CostGuide_maze2d',
 

@@ -6,8 +6,8 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from diffuser.models.diffusion import n_step_guided_p_sample, default_sample_fn
 import numpy as np
-
-
+ 
+ 
 
 
 #-----------------------------------------------------------------------------#
@@ -17,12 +17,14 @@ import numpy as np
 # the robust version means interact with no guide, then train cost to  convergence, finally test with different guide scale.
 class Parser(utils.Parser):
     dataset: str = 'maze2d-large-v1'
-    real_dataset: str = 'maze2d-large-block-v1'
-    config: str = 'config.maze2d_cost_robust'
+    real_dataset: str = 'maze2d-large-v1'
+    config: str = 'config.maze2d_costposition_robust'
     #exp: str = 'cost_robust_debug'   # experiment name to specify the save path
 
 diffusion_args = Parser().parse_args('diffusion')
 cost_args = Parser().parse_args('cost')
+
+
 
 #-----------------------------------------------------------------------------#
 #----------------------------------- logger & writer -----------------------------------#
@@ -32,7 +34,7 @@ logger = logging.getLogger("train_cost")
 logger.setLevel(logging.INFO)
 
 # 2. 配置日志输出到文件
-file_handler = logging.FileHandler(diffusion_args.savepath + '/train.log', mode = 'w')
+file_handler = logging.FileHandler(diffusion_args.savepath + '/test.log', mode = 'w')
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 console_handler = logging.StreamHandler()  # 同时输出到控制台
 
@@ -42,6 +44,7 @@ console_handler.setFormatter(formatter)
 
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
+#assert False, f'{diffusion_args.exp_name}'
 
 
 
@@ -51,7 +54,7 @@ logger.addHandler(console_handler)
 env = datasets.load_environment(diffusion_args.real_dataset)
 logger.info(f"Environment {diffusion_args.real_dataset} loaded successfully.")
 
- 
+
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- dataset ----------------------------------#
@@ -102,7 +105,7 @@ diffusion_model_config = utils.Config(
 cost_model_config = utils.Config(
     cost_args.model,
     savepath = (diffusion_args.savepath, 'cost_model_config.pkl'),
-    input_dim = 2*observation_dim + cost_args.neighbour_num,
+    input_dim = 2*(observation_dim-2) + cost_args.neighbour_num,
     output_dim = 1,
     hidden_dim = cost_args.hidden_dim,
     device = cost_args.device, 
@@ -190,7 +193,14 @@ trainer_config = utils.Config(
 )  
 
 
+'''guide_config = utils.Config(
+    'guides.guides.ValueGuide_maze2d',
+    maze_layout=env.unwrapped.str_maze_spec, 
+    #maze_layout = maze_spec,
+    normalizer=dataset.normalizer,
+)
 
+guide = guide_config()'''
 #-----------------------------------------------------------------------------#
 #-------------------------------- instantiate --------------------------------#
 #-----------------------------------------------------------------------------#
@@ -201,6 +211,7 @@ cost_model = cost_model_config()
 cost = cost_config(cost_model)
 diffusion = diffusion_config(diffusion_model)
 policy = policy_config(guide= cost, diffusion_model = diffusion)
+#
 #diffusion.load_state_dict(args.diffusion_state_dict)
 # baseline_policy  no guide
 baseline_policy_config = utils.Config(
@@ -221,6 +232,11 @@ if diffusion_args.loadpath is not None:
     baseline_policy.diffusion_model.load_state_dict(data['model'])
     logger.info(f"Baseline Diffusion model loaded from {diffusion_args.loadpath} successfully.")
 
+if cost_args.loadpath is not None:
+    data = torch.load(cost_args.loadpath)
+    policy.guide.load_state_dict(data['cost_model'])
+    logger.info(f"Cost model loaded from {cost_args.loadpath} successfully.")
+
 
 renderer = render_config()
 buffer = buffer_config()
@@ -229,7 +245,7 @@ trainer = trainer_config(env= env, renderer = renderer, policy = policy, baselin
 if diffusion_args.loadpath is not None:
     #assert False, "Loading from a path is not supported in cost training."
     trainer.load_from_pt_file(diffusion_args.loadpath)
-    logger.info(f"Diffusion model loaded from {diffusion_args.loadpath} successfully.")
+    #logger.info(f"Diffusion model loaded from {diffusion_args.loadpath} successfully.")
 
 
 
@@ -251,21 +267,43 @@ utils.report_parameters(diffusion_model)   # 3.68M
 
 
 # collect dataset
-trainer.collect()
+#trainer.collect()
 
 # train cost model
-trainer.train()
+#trainer.train()
 
 # test with diffetent scale
-scales = cost_args.scales
-scores = []
-rewards = []
-for i in range(diffusion_args.n_test_samples):
-    for scale in scales:
-        trainer.test(scale = scale, episode = i)
-    scores.append(trainer.scores)
-    rewards.append(trainer.rewards)
+#scales = cost_args.scales
 
-for i, scale in enumerate(scales):
-    logger.info(f'scale{scale} mean-score: {np.array(scores)[:,i].mean()} mean_reward: {np.array(rewards)[:,i].mean()}')
+#------------random test---------------------
+random_test = False
+if random_test:
+    scales = cost_args.scales
+    scores = []
+    rewards = []
+    for i in range(diffusion_args.n_test_samples):
+        for scale in scales:
+            trainer.test(scale = scale, episode = i)
+        scores.append(trainer.scores)
+        rewards.append(trainer.rewards)
 
+    for i, scale in enumerate(scales):
+        logger.info(f'scale{scale} mean-score: {np.array(scores)[:,i].mean()} mean_reward: {np.array(rewards)[:,i].mean()}')
+else:
+    #-------------task test
+    #scales = [0, 10, 30 ,50, 100]
+    scales = cost_args.scales
+    scores = []
+    rewards = []
+    starts = [[1,1],[7,2],[1,9]]
+    target = [7.0, 10.0]
+    trainer.vis_test_freq = 1
+    #for i in range(diffusion_args.n_test_samples):
+    for i, start in enumerate(starts):
+        for scale in scales:
+            trainer.test_task(scale = scale, episode = i, start = start, target= target)
+        scores.append(trainer.scores)
+        rewards.append(trainer.rewards)
+
+    for i, scale in enumerate(scales):
+        logger.info(f'scale{scale} mean-score: {np.array(scores)[:,i].mean()} mean_reward: {np.array(rewards)[:,i].mean()}')

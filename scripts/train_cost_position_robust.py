@@ -17,8 +17,8 @@ import numpy as np
 # the robust version means interact with no guide, then train cost to  convergence, finally test with different guide scale.
 class Parser(utils.Parser):
     dataset: str = 'maze2d-large-v1'
-    real_dataset: str = 'maze2d-large-block-v1'
-    config: str = 'config.maze2d_cost_robust'
+    real_dataset: str = 'maze2d-large-v1'
+    config: str = 'config.maze2d_costposition_robust'
     #exp: str = 'cost_robust_debug'   # experiment name to specify the save path
 
 diffusion_args = Parser().parse_args('diffusion')
@@ -51,7 +51,7 @@ logger.addHandler(console_handler)
 env = datasets.load_environment(diffusion_args.real_dataset)
 logger.info(f"Environment {diffusion_args.real_dataset} loaded successfully.")
 
- 
+
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- dataset ----------------------------------#
@@ -102,7 +102,7 @@ diffusion_model_config = utils.Config(
 cost_model_config = utils.Config(
     cost_args.model,
     savepath = (diffusion_args.savepath, 'cost_model_config.pkl'),
-    input_dim = 2*observation_dim + cost_args.neighbour_num,
+    input_dim = 2*(observation_dim-2) + cost_args.neighbour_num,
     output_dim = 1,
     hidden_dim = cost_args.hidden_dim,
     device = cost_args.device, 

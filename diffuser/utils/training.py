@@ -4,11 +4,11 @@ import numpy as np
 import torch
 import einops
 import pdb
-  
+import random
 from .arrays import batch_to_device, to_np, to_device, apply_dict
 from .timer import Timer
 from .cloud import sync_logs
-
+ 
 def cycle(dl):
     while True:
         for data in dl:
@@ -255,7 +255,7 @@ class Trainer(object):
 
 
 # This class is used to train a cost guide model for diffuser in the maze2d environment.
-class CostTrainer(object):                                                              
+class CostTrainer(object):    #execution and learning simultaneously                                                         
     def __init__(
         self,
         #diffusion_model,
@@ -663,7 +663,7 @@ class CostTrainer(object):
             savepath = os.path.join(self.logdir, f'sample-{self.step}-{i}.png')
             self.renderer.composite(savepath, observations)
 
-class CostRobustTrainer(CostTrainer):
+class CostRobustTrainer(CostTrainer):  #execution based on position and velocity
     def __init__(
         self,
         #diffusion_model,
@@ -886,7 +886,7 @@ class CostRobustTrainer(CostTrainer):
             self.renderer.composite(savepath, samples.observations)
         self.scores.append(score)
         self.rewards.append(total_reward)
-        self.logger.info(f'test-scale{scale}-episode-score{score}-reward{total_reward}')
+        self.logger.info(f'test-scale{scale}-episode-score{score}-reward{total_reward}-value{value}')
 
     def test_task(self, scale=0, episode=0, start = None, target = None):
         if start:
@@ -949,9 +949,463 @@ class CostRobustTrainer(CostTrainer):
             self.renderer.composite(savepath, samples.observations)
         self.scores.append(score)
         self.rewards.append(total_reward)
-        self.logger.info(f'test-scale{scale}-episode-score{score}-reward{total_reward}')
+        self.logger.info(f'test-scale{scale}-episode{episode}-score{score}-reward{total_reward}-value{value}')
 
 
+class CostRobustPositionTrainer(CostTrainer):   # execution based only position, w/o velocity
+    def __init__(
+        self,
+        #diffusion_model,
+        #cost_model, 
+        env = None,   #   for interaction with  the environment
+        dataset = None,  #
+        renderer = None, #for rendering the trajectory
+        policy = None,  # including the cost, diffusion, normalizer,
+        baseline_policy = None, # no guide policy for comparison,
+        buffer = None, # the experience can be reused, because i want to use the relative position rather than the absolute position
+        conditional = True,
+        writer = None,
+        logger = None,
+        epsilon=1, # when planed position is far from the real position, we need to replan
+        n_collect_episodes = 25,
+        n_train_epochs = 5,
+        vis_collect_freq = 1,
+        #ema_decay=0.995,  # do not use ema first, because it is just a simple mlp model for cost mapping
+        sample_batch_size=10, # sample the highest value within sample_batch_size traj. 
+        train_batch_size=32,
+        train_lr=2e-5,
+        vis_test_freq = 5,
+        save_freq=1,
+        save_parallel=False,
+        results_folder='./results',
+        bucket=None,
+    ):
+        #super().__init__(env, dataset, renderer, policy, baseline_policy, buffer, conditional, writer, logger, epsilon, 
+        #            update_guide_freq, sample_batch_size, train_batch_size, train_lr, test_freq, n_test_samples, 
+        #            save_freq, label_freq, save_parallel, results_folder, bucket)
+        #super().__init__()
+        self.policy = policy
+        self.baseline_policy = baseline_policy
+
+        #self.cost_model = policy.guide
+        self.diffusion = policy.diffusion_model
+        self.writer = writer
+        self.logger = logger
+        self.buffer = buffer
+        self.env = env
+        self.epsilon = epsilon
+        
+        #self.cost_weight = cost_weight
+        self.conditional = conditional
+        self.n_collect_episodes = n_collect_episodes
+        self.n_train_epochs = n_train_epochs
+        self.vis_collect_freq = vis_collect_freq
+        self.vis_test_freq = vis_test_freq
+ 
+        #self.step_start_ema = step_start_ema
+        self.sample_batch_size = sample_batch_size
+        #self.log_freq = log_freq
+        #self.sample_freq = sample_freq
+        self.save_freq = save_freq
+        
+
+        self.save_parallel = save_parallel
+
+        self.batch_size = train_batch_size
+        #self.gradient_accumulate_every = gradient_accumulate_every
+
+
+        '''self.dataset = dataset
+        self.dataloader = cycle(torch.utils.data.DataLoader(
+            self.dataset, batch_size=train_batch_size, num_workers=1, shuffle=True, pin_memory=True
+        ))
+        self.dataloader_vis = cycle(torch.utils.data.DataLoader(
+            self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
+        ))'''
+        self.renderer = renderer
+        self.optimizer = torch.optim.Adam(self.policy.guide.parameters(), lr=train_lr)
+
+        self.logdir = results_folder
+        self.bucket = bucket
+
+        self.start = None
+        self.target = None # for assign the test task
+    def collect(self, scale = 0):
+        """
+            用于收集数据，存储在buffer里
+        """
+        if scale ==0:
+            policy = self.baseline_policy
+        else:
+            policy = self.policy
+            policy.scale = scale
+        for episode in range(self.n_collect_episodes):
+            #记录plan和执行的observation，可视化renderer
+            real_observation = np.zeros([self.env.max_episode_steps+1,self.diffusion.observation_dim], dtype=np.float32)
+            plan_observation = np.zeros([self.env.max_episode_steps+1,self.diffusion.observation_dim], dtype=np.float32)
+            #actions_rollout = np.vstack((actions_rollout, action_rollout))
+            observation = self.env.reset()
+            real_observation[0] = observation.copy()
+            plan_observation[0] = observation.copy()
+            if self.conditional == True:
+                self.env.set_target()
+            target = self.env.get_target()
+            self.logger.info(f'collect-episode{episode}start{observation[:2]}end{target}')
+            cond = {self.diffusion.horizon - 1: np.array([*target, 0, 0]),}
+            t= 0 #t in the planing    step is for the execution
+            n_plans = 0 # the times to replan
+            total_reward = 0.0
+            for step in range(self.env.max_episode_steps):
+                if t == 0:
+                    n_plans +=1
+                    cond[0] = observation
+
+                    action, samples = policy(cond, batch_size=self.sample_batch_size)
+                    actions = samples.actions[0]
+                    sequence = samples.observations[0]
+                    value = samples.value[0]
+                
+                if t < len(sequence) - 1:
+                    next_waypoint = sequence[t+1]
+                else:
+                    next_waypoint = sequence[-1].copy()
+                    next_waypoint[2:] = 0
+
+                action = next_waypoint[:2] - observation[:2] #+ (next_waypoint[2:] - observation[2:])
+                next_observation, reward, terminal, _ = self.env.step(action)
+                real_observation[step+1] = next_observation.copy()
+                plan_observation[step+1] = next_waypoint.copy()
+                x, y = self.policy.guide.get_training_data(observation, next_observation, next_waypoint)
+                total_reward += reward
+                score = self.env.get_normalized_score(total_reward)
+                '''print(
+                    f't: {t} | r: {reward:.2f} |  R: {total_reward:.2f} | score: {score:.4f} | '
+                    f'{action} | terminal: {terminal} | '
+                )'''
+                self.buffer.add(
+                    data= x, # 4+4+neighbor_num
+                    label = y, #-cost
+                )
+                observation = next_observation
+                t += 1
+                #self.logger.info(f'episode{episode}step{step}t{t}norm{np.linalg.norm(observation - next_waypoint)}')
+                if np.linalg.norm(observation[:2] - next_waypoint[:2]) > self.epsilon:
+                   #self.logger.info(f'obs{observation}way{next_waypoint}norm{np.linalg.norm(observation - next_waypoint)}')
+                   t=0
+                
+            # end of the episode
+            # i want to save the model log the loss, reward, score test the model.
+            self.logger.info(f'Collect Episode {episode} | Total Reward: {total_reward:.2f} | Score: {score:.4f} | Replan:{n_plans}')
+            self.writer.add_scalar('Collect total reward', total_reward, episode)
+            self.writer.add_scalar('Collect score', score, episode)
+
+            #  plot the traj
+            if episode % self.vis_collect_freq == 0:
+                savepath = os.path.join(self.logdir, f'collect_rollout{episode}.png')
+                self.renderer.composite(savepath, np.array(real_observation)[None], ncol=1)
+                savepath = os.path.join(self.logdir, f'collect_plan{episode}.png')
+                self.renderer.composite(savepath, np.array(plan_observation)[None], ncol=1)
+        save_path = os.path.join(self.logdir, f'scale{scale}size{len(self.buffer)}.pt')
+        self.buffer.save(save_path)
+        self.logger.info(f'scale{scale}collect-buffer-size{len(self.buffer)}')
+
+        # save the buffer
+    def train(self):
+        """
+            
+        """
+        nums = len(self.buffer)
+        n_iters = int(self.n_train_epochs * nums //self.batch_size)
+        for i in range(n_iters):
+            loss = self.replay()
+            self.logger.info(f'TrainIter{i}of{n_iters}:loss{loss}')
+            self.writer.add_scalar('train-cost-loss', loss, i)
+
+            if i % int(self.save_freq *  nums //self.batch_size) == 0:
+                label = int(i // (nums // (self.batch_size)))
+                self.save(label)
+
+    def test(self, scale=0, episode=0):
+        if scale ==0:
+            policy = self.baseline_policy
+            #policy = self.policy
+            #policy.sample_kwargs["scale"] = scale
+            self.scores = []
+            self.rewards = []
+            observation = self.env.reset()
+            self.start = observation[:2]
+            if self.conditional == True:
+                self.env.set_target()
+            self.target = self.env.get_target()
+            self.logger.info(f'test-episode{episode}start{self.start}end{self.target}')
+        else:
+            policy = self.policy
+            policy.sample_kwargs["scale"] = scale
+            observation = self.env.reset_to_location(self.start)
+    
+        cond = {self.diffusion.horizon - 1: np.array([*self.target, 0, 0]),}
+        total_reward = 0.0
+        rollout = [observation.copy()]
+        for t in range(self.env.max_episode_steps):
+            if t == 0:
+                cond[0] = observation
+
+                action, samples = policy(cond, batch_size=self.sample_batch_size)
+                actions = samples.actions[0]
+                sequence = samples.observations[0]
+                value = samples.value[0]
+
+            if t < len(sequence) - 1:
+                next_waypoint = sequence[t+1]
+            else:
+                next_waypoint = sequence[-1].copy()
+                next_waypoint[2:] = 0
+
+            action = next_waypoint[:2] - observation[:2] #+ (next_waypoint[2:] - observation[2:])
+            next_observation, reward, terminal, _ = self.env.step(action)
+            rollout.append(next_observation.copy())
+            #real_observation[step+1] = next_observation.copy()
+            #plan_observation[step+1] = next_waypoint.copy()
+            #x, y = self.policy.guide.get_training_data(observation, next_observation, next_waypoint)
+            total_reward += reward
+            score = self.env.get_normalized_score(total_reward)
+            observation = next_observation
+        if episode % self.vis_test_freq == 0:
+            savepath = os.path.join(self.logdir, f'test-scale{scale}-{episode}.png')
+            self.renderer.composite(savepath, np.array(rollout)[None], ncol=1)
+            savepath = os.path.join(self.logdir, f'test-scale{scale}-plan{episode}.png')
+            self.renderer.composite(savepath, samples.observations)
+        self.scores.append(score)
+        self.rewards.append(total_reward)
+        self.logger.info(f'test-scale{scale}-episode-score{score}-reward{total_reward}-value{value}')
+
+    def test_task(self, scale=0, episode=0, start = None, target = None):
+        if start:
+            self.start = start
+            observation= self.env.reset_to_location(self.start)
+        else:
+            observation = self.env.reset()
+            self.start = observation[:2]
+
+
+        if target:
+            self.target = target
+        else:
+            if self.conditional == True:
+                self.env.set_target()
+            self.target = self.env.get_target()
+        self.logger.info(f'test-episode{episode}start{self.start}end{self.target}')
+        if scale ==0:
+            policy = self.baseline_policy
+            self.scores = []
+            self.rewards = []
+            
+        else:
+            policy = self.policy
+            #print(policy.sample_kwargs)
+            policy.sample_kwargs["scale"] = scale
+            #assert False, policy.sample_kwargs
+    
+        cond = {self.diffusion.horizon - 1: np.array([*self.target, 0, 0]),}
+        total_reward = 0.0
+        rollout = [observation.copy()]
+        for t in range(self.env.max_episode_steps):
+            if t == 0:
+                cond[0] = observation
+
+                action, samples = policy(cond, batch_size=self.sample_batch_size)
+                actions = samples.actions[0]
+                sequence = samples.observations[0]
+                value = samples.value[0]
+
+            if t < len(sequence) - 1:
+                next_waypoint = sequence[t+1]
+            else:
+                next_waypoint = sequence[-1].copy()
+                next_waypoint[2:] = 0
+
+            action = next_waypoint[:2] - observation[:2] #+ (next_waypoint[2:] - observation[2:])
+            next_observation, reward, terminal, _ = self.env.step(action)
+            rollout.append(next_observation.copy())
+            #real_observation[step+1] = next_observation.copy()
+            #plan_observation[step+1] = next_waypoint.copy()
+            #x, y = self.policy.guide.get_training_data(observation, next_observation, next_waypoint)
+            total_reward += reward
+            score = self.env.get_normalized_score(total_reward)
+            observation = next_observation
+        if episode % self.vis_test_freq == 0:
+            savepath = os.path.join(self.logdir, f'test-scale{scale}-{episode}.png')
+            self.renderer.composite(savepath, np.array(rollout)[None], ncol=1)
+            savepath = os.path.join(self.logdir, f'test-scale{scale}-plan{episode}.png')
+            self.renderer.composite(savepath, samples.observations)
+        self.scores.append(score)
+        self.rewards.append(total_reward)
+        self.logger.info(f'test-scale{scale}-episode{episode}-score{score}-reward{total_reward}-value{value}')
+
+
+class CostRobustRandomTrainer(CostRobustTrainer):  #execution based on position and velocity
+    def __init__(
+        self,
+        #diffusion_model,
+        #cost_model, 
+        env = None,   #   for interaction with  the environment
+        dataset = None,  #
+        renderer = None, #for rendering the trajectory
+        policy = None,  # including the cost, diffusion, normalizer,
+        baseline_policy = None, # no guide policy for comparison,
+        buffer = None, # the experience can be reused, because i want to use the relative position rather than the absolute position
+        conditional = True,
+        writer = None,
+        logger = None,
+        epsilon=1, # when planed position is far from the real position, we need to replan
+        n_collect_episodes = 25,
+        n_train_epochs = 5,
+        vis_collect_freq = 1,
+        #ema_decay=0.995,  # do not use ema first, because it is just a simple mlp model for cost mapping
+        sample_batch_size=10, # sample the highest value within sample_batch_size traj. 
+        train_batch_size=32,
+        train_lr=2e-5,
+        vis_test_freq = 5,
+        save_freq=1,
+        save_parallel=False,
+        results_folder='./results',
+        bucket=None,
+    ):
+        #super().__init__(env, dataset, renderer, policy, baseline_policy, buffer, conditional, writer, logger, epsilon, 
+        #            update_guide_freq, sample_batch_size, train_batch_size, train_lr, test_freq, n_test_samples, 
+        #            save_freq, label_freq, save_parallel, results_folder, bucket)
+        #super().__init__()
+        self.policy = policy
+        self.baseline_policy = baseline_policy
+
+        #self.cost_model = policy.guide
+        self.diffusion = policy.diffusion_model
+        self.writer = writer
+        self.logger = logger
+        self.buffer = buffer
+        self.env = env
+        self.epsilon = epsilon
+        
+        #self.cost_weight = cost_weight
+        self.conditional = conditional
+        self.n_collect_episodes = n_collect_episodes
+        self.n_train_epochs = n_train_epochs
+        self.vis_collect_freq = vis_collect_freq
+        self.vis_test_freq = vis_test_freq
+ 
+        #self.step_start_ema = step_start_ema
+        self.sample_batch_size = sample_batch_size
+        #self.log_freq = log_freq
+        #self.sample_freq = sample_freq
+        self.save_freq = save_freq
+        
+
+        self.save_parallel = save_parallel
+
+        self.batch_size = train_batch_size
+        #self.gradient_accumulate_every = gradient_accumulate_every
+
+
+        '''self.dataset = dataset
+        self.dataloader = cycle(torch.utils.data.DataLoader(
+            self.dataset, batch_size=train_batch_size, num_workers=1, shuffle=True, pin_memory=True
+        ))
+        self.dataloader_vis = cycle(torch.utils.data.DataLoader(
+            self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
+        ))'''
+        self.renderer = renderer
+        self.optimizer = torch.optim.Adam(self.policy.guide.parameters(), lr=train_lr)
+
+        self.logdir = results_folder
+        self.bucket = bucket
+
+        self.start = None
+        self.target = None # for assign the test task
+    def collect(self, scale = 0):
+        """
+            用于收集数据，存储在buffer里
+        """
+        if scale ==0:
+            policy = self.baseline_policy
+        else:
+            policy = self.policy
+            policy.scale = scale
+        for episode in range(self.n_collect_episodes):
+            #记录plan和执行的observation，可视化renderer
+            real_observation = np.zeros([self.env.max_episode_steps+1,self.diffusion.observation_dim], dtype=np.float32)
+            plan_observation = np.zeros([self.env.max_episode_steps+1,self.diffusion.observation_dim], dtype=np.float32)
+            #actions_rollout = np.vstack((actions_rollout, action_rollout))
+            observation = self.env.reset()
+            real_observation[0] = observation.copy()
+            plan_observation[0] = observation.copy()
+            #if self.conditional == True:
+            #    self.env.set_target()
+            #target = self.env.get_target()
+            self.logger.info(f'collect-episode{episode}start{observation[:2]}')
+            #cond = {self.diffusion.horizon - 1: np.array([*target, 0, 0]),}
+            t= 0 #t in the planing    step is for the execution
+            n_plans = 0 # the times to replan
+            total_reward = 0.0
+            for step in range(self.env.max_episode_steps):
+                if t == 0:
+                    n_plans +=1
+                    if self.conditional == True:
+                        target = [random.uniform(1.0, 9.0) for _ in range(2)]
+                    self.logger.info(f'collect-episode{episode}-plan{n_plans}-end{target}')
+                    cond = {self.diffusion.horizon - 1: np.array([*target, 0, 0]),}
+                    cond[0] = observation
+
+                    action, samples = policy(cond, batch_size=self.sample_batch_size)
+                    actions = samples.actions[0]
+                    sequence = samples.observations[0]
+                    value = samples.value[0]
+                
+                if t < len(sequence) - 1:
+                    next_waypoint = sequence[t+1]
+                else:
+                    next_waypoint = sequence[-1].copy()
+                    next_waypoint[2:] = 0
+
+                action = next_waypoint[:2] - observation[:2] + (next_waypoint[2:] - observation[2:])
+                next_observation, reward, terminal, _ = self.env.step(action)
+                real_observation[step+1] = next_observation.copy()
+                plan_observation[step+1] = next_waypoint.copy()
+                x, y = self.policy.guide.get_training_data(observation, next_observation, next_waypoint)
+                total_reward += reward
+                score = self.env.get_normalized_score(total_reward)
+                '''print(
+                    f't: {t} | r: {reward:.2f} |  R: {total_reward:.2f} | score: {score:.4f} | '
+                    f'{action} | terminal: {terminal} | '
+                )'''
+                self.buffer.add(
+                    data= x, # 4+4+neighbor_num
+                    label = y, #-cost
+                )
+                observation = next_observation
+                t += 1
+                #self.logger.info(f'episode{episode}step{step}t{t}norm{np.linalg.norm(observation - next_waypoint)}')
+                if np.linalg.norm(observation - next_waypoint) > self.epsilon:
+                   #self.logger.info(f'obs{observation}way{next_waypoint}norm{np.linalg.norm(observation - next_waypoint)}')
+                   t=0
+                
+            # end of the episode
+            # i want to save the model log the loss, reward, score test the model.
+            self.logger.info(f'Collect Episode {episode} | Total Reward: {total_reward:.2f} | Score: {score:.4f} | Replan:{n_plans}')
+            self.writer.add_scalar('Collect total reward', total_reward, episode)
+            self.writer.add_scalar('Collect score', score, episode)
+
+            #  plot the traj
+            if episode % self.vis_collect_freq == 0:
+                savepath = os.path.join(self.logdir, f'collect_rollout{episode}.png')
+                self.renderer.composite(savepath, np.array(real_observation)[None], ncol=1)
+                savepath = os.path.join(self.logdir, f'collect_plan{episode}.png')
+                self.renderer.composite(savepath, np.array(plan_observation)[None], ncol=1)
+        save_path = os.path.join(self.logdir, f'scale{scale}size{len(self.buffer)}.pt')
+        self.buffer.save(save_path)
+        self.logger.info(f'scale{scale}collect-buffer-size{len(self.buffer)}')
+
+        # save the buffer
+    
 
 
 
