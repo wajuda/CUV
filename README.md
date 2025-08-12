@@ -28,6 +28,17 @@ This repository is forked from [Planning with Diffusion for Flexible Behavior Sy
     1. state only includes posi, no idea about env. Only can memorize the off-line data whereas the true env plan ability.
     2. no value guide for maze2d.
 
+$$
+\begin{split}
+    g &= \nabla_{\tau^t=\mu^t} \log p_\phi(O_{1:T}, U|\tau^t) \\
+      &= \nabla_{\tau^t=\mu^t} \log \left[ p_{\phi_1}(O_{1:T}|\tau^t) p_{\phi_2}(U|\tau^t) \right] \\
+      &= \sum_{t=0}^T \nabla_{s_t} r_{\phi_1}(s_t) + Z_0 \sum_{t=0}^T \nabla_{s_t, s_{t+1}} \log \max_{a_t \in U_t} p_{\phi_2}(s_{t+1}|s_t, a_t) p(a_t) \\
+      &= \nabla J(\mu) \\
+    p(\tau^{t-1}|\tau^t, O_{1:T}, U) &= Z p_\theta(\tau^{t-1}|\tau^t) p_\phi(O_{1:T}, U|\tau^{t-1}) \\
+      &= \mathcal{N}(\mu^t + w \Sigma^t g, \Sigma^t)
+\end{split}
+$$
+
 ### 6.5~6.23
 **Attempt 1**
 1. assign the target in the wall, aka, new ability
@@ -92,6 +103,7 @@ python plan_guided.py --config maze2d_guide.py
 python train_cost_robust --config maze2d_cost_robust.py
 #training 1.collecting with pretrained 2.train cost 3. test  using CostRobustTrainer
 ```
+
 <p align="center">
     <img src="figures/costguide.png" width="60%" title="costguide">
 </p>
