@@ -1,109 +1,107 @@
-# Planning with Diffusion &nbsp;&nbsp; [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1YajKhu-CUIGBJeQPehjVPJcK_b38a8Nc?usp=sharing)
-# hahahahaaa
-
-Training and visualizing of diffusion models from [Planning with Diffusion for Flexible Behavior Synthesis](https://diffusion-planning.github.io/).
-This branch has the Maze2D experiments and will be merged into main shortly.
-
-<p align="center">
-    <img src="https://diffusion-planning.github.io/images/diffuser-card.png" width="60%" title="Diffuser model">
-</p>
+# Planning with Diffusion by CUV agent
 
 ## Quickstart
 
-Load a pretrained diffusion model and sample from it in your browser with [scripts/diffuser-sample.ipynb](https://colab.research.google.com/drive/1YajKhu-CUIGBJeQPehjVPJcK_b38a8Nc?usp=sharing).
+This repository is forked from [Planning with Diffusion for Flexible Behavior Synthesis](https://diffusion-planning.github.io/).
 
+## RoadMap
+### 4.08~4.26
+1. learning $CUV$ system: $C$ (Cognitive); $U$ (Utility); $V$ (Value).
+2. learning classic planning methods: 
+    1. Dreamers (model-based)
+    2. Option (hierarchy RL)
+    3. Diffuser (Diffusion based off-line)
 
-## Installation
+### 4.27~5.22
+1. Diffusion
+    1. classifier guided
+    2. classifier free
+2. CUV+diffusion what why?
+    1. P(U|$\tau$)
+    2. strong plan ability
+    3. evolve ability 
+  
+### 5.23~6.4
+1. check the code of diffuser and maze2d env
+2. diffuser environment setting up
+3. find shortcomming of diffuser:
+    1. state only includes posi, no idea about env. Only can memorize the off-line data whereas the true env plan ability.
+    2. no value guide for maze2d.
 
-```
-conda env create -f environment.yml
-conda activate diffusion
-pip install -e .
-```
-
-## Usage
-
-Train a diffusion model with:
-```
-python scripts/train.py --config config.maze2d --dataset maze2d-large-v1
-```
-
-The default hyperparameters are listed in [`config/maze2d.py`](config/maze2d.py).
-You can override any of them with runtime flags, eg `--batch_size 64`.
-
-Plan using the diffusion model with:
-```
-python scripts/plan_maze2d.py --config config.maze2d --dataset maze2d-large-v1
-```
-
-
-## Docker
-
-1. Build the container:
-```
-docker build -f azure/Dockerfile . -t diffuser
-```
-
-2. Test the container:
-```
-docker run -it --rm --gpus all \
-    --mount type=bind,source=$PWD,target=/home/code \
-    --mount type=bind,source=$HOME/.d4rl,target=/root/.d4rl \
-    diffuser \
-    bash -c \
-    "export PYTHONPATH=$PYTHONPATH:/home/code && \
-    python /home/code/scripts/train.py --dataset hopper-medium-expert-v2 --logbase logs/docker"
+### 6.5~6.23
+**Attempt 1**
+1. assign the target in the wall, aka, new ability
+2. crop some valid path into a buffer
+3. finetune the pretrained diffuser to use the new ability better.
+```python
+python generate_data.py # generate rollout data for different start and target point
+python train.py --config maze2d_finetune# load pretrained and fine tune
 ```
 
+<p align="center">
+    <img src="figures/crop+finetune.png" width="60%" title="crop+finetune">
+</p>
+ 
+4. results: although better in new task but worse in old tasks
+<p align="center">
+    <img src="figures/crop+finetune-result.png" width="60%" title="crop+finetune-result">
+</p>
 
-## Running on Azure
-
-#### Setup
-
-1. Launching jobs on Azure requires one more python dependency:
+### 6.24~6.26
+**Attempt 2**
+1. too simple, can not be recognized as a method.
+2. also only memorize.
+3. explore the whole maze.
+```python
+python coverage.py --config maze2d_cover.py #connect different traj
+#using Maze2dRendererCover
 ```
-pip install git+https://github.com/JannerM/doodad.git@janner
+<p align="center">
+    <img src="figures/cover.png" width="60%" title="cover">
+</p>
+4. the agent can explore the whole map. How to use it?
+
+### 6.27~7.13
+**Attempt 3**
+1. Env-guided diffuser
+2. read papers:
+    1. conditional diffuser (compose classifier)
+    2. meta diffuser (latent code of task)
+    3. safe diffusion (constraints)
+3. also data based. proposed a true env-based diffuser
+4. guide away from wall\
+```python
+python plan_guided.py --config maze2d_guide.py
+# use the guides.guides and guided_policies
 ```
+<p align="center">
+    <img src="figures/ruleguide.png" width="60%" title="ruleguide">
+</p>
+<p align="center">
+    <img src="figures/ruleguidediffusion.png" width="60%" title="ruleguidediffusion">
+</p>
+5. rule-based, not general, can not forbid hithting the wall
 
-2. Tag the image built in [the previous section](#Docker) and push it to Docker Hub:
+### 7.14~8.3
+1. learnable guide
+2. read paper
+    1. Qss
+    2. andrew tutorial
+3. cost guide (c = |x'-x''|), the diff of plan and exec. Idealy, if plan in the wall ,it can not arrive, c must be big, after learning, it can plan forbid the wall.
+```python
+python train_cost_robust --config maze2d_cost_robust.py
+#training 1.collecting with pretrained 2.train cost 3. test  using CostRobustTrainer
 ```
-export DOCKER_USERNAME=$(docker info | sed '/Username:/!d;s/.* //')
-docker tag diffuser ${DOCKER_USERNAME}/diffuser:latest
-docker image push ${DOCKER_USERNAME}/diffuser
-```
-
-3. Update [`azure/config.py`](azure/config.py), either by modifying the file directly or setting the relevant [environment variables](azure/config.py#L47-L52). To set the `AZURE_STORAGE_CONNECTION` variable, navigate to the `Access keys` section of your storage account. Click `Show keys` and copy the `Connection string`.
-
-4. Download [`azcopy`](https://docs.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10): `./azure/download.sh`
-
-#### Usage
-
-Launch training jobs with `python azure/launch.py`. The launch script takes no command-line arguments; instead, it launches a job for every combination of hyperparameters in [`params_to_sweep`](azure/launch_train.py#L36-L38).
+<p align="center">
+    <img src="figures/costguide.png" width="60%" title="costguide">
+</p>
+4. guide is more like a sort of existing distribution, not a new road.
 
 
-#### Viewing results
-
-To rsync the results from the Azure storage container, run `./azure/sync.sh`.
-
-To mount the storage container:
-1. Create a blobfuse config with `./azure/make_fuse_config.sh`
-2. Run `./azure/mount.sh` to mount the storage container to `~/azure_mount`
-
-To unmount the container, run `sudo umount -f ~/azure_mount; rm -r ~/azure_mount`
+### 8.4~current
+1. MCTD(plan + exploit)
+2. over
 
 
-## Reference
-```
-@inproceedings{janner2022diffuser,
-  title = {Planning with Diffusion for Flexible Behavior Synthesis},
-  author = {Michael Janner and Yilun Du and Joshua B. Tenenbaum and Sergey Levine},
-  booktitle = {International Conference on Machine Learning},
-  year = {2022},
-}
-```
 
 
-## Acknowledgements
-
-The diffusion model implementation is based on Phil Wang's [denoising-diffusion-pytorch](https://github.com/lucidrains/denoising-diffusion-pytorch) repo.
-The organization of this repo and remote launcher is based on the [trajectory-transformer](https://github.com/jannerm/trajectory-transformer) repo.
